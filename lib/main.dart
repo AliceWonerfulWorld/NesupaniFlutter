@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
+import 'screens/eye_detection_screen.dart';
 
-void main() {
-  runApp(const MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final cameras = await availableCameras();
+  runApp(MyApp(cameras: cameras));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final List<CameraDescription> cameras;
 
-  // This widget is the root of your application.
+  const MyApp({super.key, required this.cameras});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: '寝過ごしゲーム',
       theme: ThemeData(
         // This is the theme of your application.
         //
@@ -28,9 +33,10 @@ class MyApp extends StatelessWidget {
         //
         // This works for code too, not just values: Most code changes can be
         // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: EyeDetectionScreen(cameras: cameras),
     );
   }
 }
