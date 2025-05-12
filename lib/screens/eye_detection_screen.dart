@@ -42,6 +42,8 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   ];
   int _currentStationIndex = 0;
   double _sceneryOffset = 0.0;
+  Face? _debugFace;
+  bool _wasEyesOpen = true;
 
   @override
   void initState() {
@@ -53,6 +55,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         enableClassification: true,
         enableTracking: true,
         minFaceSize: 0.15,
+        enableLandmarks: true,
       ),
     );
 
@@ -146,11 +149,12 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
 
       final Size imageSize = Size(image.width.toDouble(), image.height.toDouble());
 
+      final rotation = _controller!.description.sensorOrientation;
       final inputImage = InputImage.fromBytes(
         bytes: bytes,
         metadata: InputImageMetadata(
           size: imageSize,
-          rotation: InputImageRotation.rotation0deg,
+          rotation: InputImageRotation.values[rotation ~/ 90],
           format: InputImageFormat.yuv420,
           bytesPerRow: image.planes[0].bytesPerRow,
         ),
@@ -160,6 +164,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       if (faces.isEmpty) {
         setState(() {
           _debugStatus = '顔が検出されていません';
+          _debugFace = null;
         });
         return;
       }
@@ -172,16 +177,30 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         return;
       }
 
-      final leftEyeOpen = face.leftEyeOpenProbability! > 0.5;
-      final rightEyeOpen = face.rightEyeOpenProbability! > 0.5;
+      final isFrontCamera = _controller!.description.lensDirection == CameraLensDirection.front;
+      final leftProb = isFrontCamera
+          ? face.rightEyeOpenProbability ?? 1.0
+          : face.leftEyeOpenProbability ?? 1.0;
+      final rightProb = isFrontCamera
+          ? face.leftEyeOpenProbability ?? 1.0
+          : face.rightEyeOpenProbability ?? 1.0;
+      // 厳しめのしきい値
+      final leftEyeClosed = leftProb < 0.2;
+      final rightEyeClosed = rightProb < 0.2;
+      final leftEyeOpen = !leftEyeClosed;
+      final rightEyeOpen = !rightEyeClosed;
 
       setState(() {
         _debugStatus = '左目: ${leftEyeOpen ? "開" : "閉"}\n右目: ${rightEyeOpen ? "開" : "閉"}';
+        _isEyesOpen = leftEyeOpen || rightEyeOpen;
+        _debugFace = face;
       });
 
-      if (_isGameStarted && !leftEyeOpen && !rightEyeOpen) {
+      // 「開→完全に両目が閉じた瞬間」だけ加算
+      if (_isGameStarted && _wasEyesOpen && leftEyeClosed && rightEyeClosed) {
         _addScore();
       }
+      _wasEyesOpen = leftEyeOpen || rightEyeOpen;
     } catch (e) {
       print('画像処理エラー: $e');
       setState(() {
@@ -250,13 +269,19 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     );
   }
 
-  void _toggleDebugMode() {
+  void _toggleDebugMode() async {
     setState(() {
       _isDebugMode = !_isDebugMode;
       if (!_isDebugMode) {
         _debugStatus = '';
+        _debugFace = null;
       }
     });
+    if (_isDebugMode) {
+      await _initializeCamera();
+    } else {
+      await _stopCamera();
+    }
   }
 
   @override
@@ -275,120 +300,134 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     return Scaffold(
       body: Stack(
         children: [
-          // デバッグモード時のカメラプレビュー
-          if (_isDebugMode && _controller != null && _controller!.value.isInitialized)
-            Positioned.fill(
-              child: AspectRatio(
-                aspectRatio: 1 / _controller!.value.aspectRatio,
-                child: CameraPreview(_controller!),
-              ),
-            ),
-          // 電車内の背景
-          if (_isGameStarted)
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.blue.shade900,
-                    Colors.blue.shade700,
-                  ],
-                ),
-              ),
-            ),
-          // 外の景色（アニメーション）
+          // イラスト風電車内
+          Positioned.fill(child: CustomPaint(painter: TrainInteriorPainter())),
+          // 窓の外の景色アニメーション
           if (_isGameStarted && _isEyesOpen)
-            Positioned.fill(
-              child: Transform.translate(
-                offset: Offset(-_sceneryOffset * 1000, 0),
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                      colors: [
-                        Colors.green.shade800,
-                        Colors.green.shade600,
-                        Colors.green.shade800,
-                      ],
-                      stops: const [0.0, 0.5, 1.0],
+            Positioned(
+              left: MediaQuery.of(context).size.width * 0.08,
+              top: MediaQuery.of(context).size.height * 0.18,
+              width: MediaQuery.of(context).size.width * 0.84,
+              height: MediaQuery.of(context).size.height * 0.18,
+              child: AnimatedSceneryWidget(offset: _sceneryOffset),
+            ),
+          // スコア・駅名（座席の上に表示）
+          if (_isGameStarted)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: MediaQuery.of(context).size.height * 0.32,
+              child: Column(
+                children: [
+                  Text(
+                    'スコア: $_score',
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      shadows: [Shadow(blurRadius: 4, color: Colors.black45, offset: Offset(1,1))],
                     ),
                   ),
-                ),
-              ),
-            ),
-          // 電車の窓枠
-          if (_isGameStarted)
-            Positioned.fill(
-              child: CustomPaint(
-                painter: TrainWindowPainter(),
-              ),
-            ),
-          // ゲームUI
-          Container(
-            color: _isDebugMode ? Colors.transparent : Colors.blue[100],
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (_isGameStarted) ...[
-                    Text(
-                      'スコア: $_score',
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '次の駅: $_currentStation',
                       style: const TextStyle(
-                        fontSize: 24,
+                        fontSize: 20,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
                     ),
-                    const SizedBox(height: 20),
-                    if (_currentStation.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.7),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          '次の駅: $_currentStation',
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                  ] else ...[
-                    const Text(
-                      '寝過ごしゲーム',
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: _startGame,
-                      child: const Text('ゲーム開始'),
-                    ),
-                    const SizedBox(height: 10),
-                    ElevatedButton(
-                      onPressed: _toggleDebugMode,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isDebugMode ? Colors.red : null,
-                      ),
-                      child: Text(_isDebugMode ? 'デバッグモード終了' : 'デバッグモード開始'),
-                    ),
-                  ],
+                  ),
                 ],
               ),
             ),
-          ),
-          // デバッグモード時の情報表示
-          if (_isDebugMode)
+          // ゲーム開始・デバッグボタン
+          if (!_isGameStarted)
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    '寝過ごしゲーム',
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: _startGame,
+                    child: const Text('ゲーム開始'),
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton(
+                    onPressed: _toggleDebugMode,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isDebugMode ? Colors.red : null,
+                    ),
+                    child: Text(_isDebugMode ? 'デバッグモード終了' : 'デバッグモード開始'),
+                  ),
+                ],
+              ),
+            ),
+          // デバッグモード時のカメラプレビュー
+          if (_isDebugMode && _controller != null && _controller!.value.isInitialized)
+            Positioned.fill(
+              child: Builder(
+                builder: (context) {
+                  Size adjustedPreviewSize = _controller!.value.previewSize!;
+                  if (MediaQuery.of(context).orientation == Orientation.portrait && adjustedPreviewSize.width > adjustedPreviewSize.height) {
+                    adjustedPreviewSize = Size(adjustedPreviewSize.height, adjustedPreviewSize.width);
+                  }
+                  return Center(
+                    child: AspectRatio(
+                      aspectRatio: 1 / _controller!.value.aspectRatio,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final previewW = constraints.maxWidth;
+                          final previewH = constraints.maxHeight;
+                          return Stack(
+                            children: [
+                              CameraPreview(_controller!),
+                              if (_debugFace != null)
+                                CustomPaint(
+                                  painter: FaceLandmarkPainter(
+                                    _debugFace!,
+                                    adjustedPreviewSize,
+                                    _controller!.description.lensDirection == CameraLensDirection.front,
+                                    previewW,
+                                    previewH,
+                                  ),
+                                  size: Size(previewW, previewH),
+                                ),
+                              Positioned(
+                                top: 40,
+                                right: 40,
+                                child: ElevatedButton(
+                                  onPressed: _toggleDebugMode,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                  ),
+                                  child: const Text('デバッグモード終了'),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          // ゲーム中も顔認識・目の状態を表示
+          if (_isGameStarted)
             Positioned(
               top: 40,
               left: 20,
@@ -413,43 +452,155 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   }
 }
 
-class TrainWindowPainter extends CustomPainter {
+class AnimatedSceneryWidget extends StatelessWidget {
+  final double offset;
+  const AnimatedSceneryWidget({super.key, required this.offset});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Stack(
+        children: [
+          // 空
+          Positioned.fill(
+            child: Container(color: Colors.lightBlueAccent),
+          ),
+          // 流れる木々
+          Positioned(
+            left: -200 + offset * 400,
+            bottom: 0,
+            child: Row(
+              children: List.generate(5, (i) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Icon(Icons.park, color: Colors.green[800], size: 60),
+              )),
+            ),
+          ),
+          // 流れる家
+          Positioned(
+            left: 100 - offset * 400,
+            bottom: 10,
+            child: Row(
+              children: List.generate(3, (i) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 80),
+                child: Icon(Icons.home, color: Colors.brown[400], size: 50),
+              )),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class TrainInteriorPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.black
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 5.0;
-
-    // 窓枠を描画
-    final windowWidth = size.width * 0.8;
-    final windowHeight = size.height * 0.6;
-    final windowLeft = (size.width - windowWidth) / 2;
-    final windowTop = (size.height - windowHeight) / 2;
-
-    // 外枠
-    canvas.drawRect(
-      Rect.fromLTWH(windowLeft, windowTop, windowWidth, windowHeight),
+    final paint = Paint();
+    // 床
+    paint.color = const Color(0xFFE0C9A6);
+    canvas.drawRect(Rect.fromLTWH(0, size.height * 0.7, size.width, size.height * 0.3), paint);
+    // 座席
+    paint.color = Colors.green[400]!;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, size.height * 0.6, size.width, size.height * 0.12),
+        const Radius.circular(18),
+      ),
       paint,
     );
-
-    // 縦の仕切り
-    final dividerWidth = 10.0;
-    final dividerX = size.width / 2 - dividerWidth / 2;
-    canvas.drawRect(
-      Rect.fromLTWH(dividerX, windowTop, dividerWidth, windowHeight),
+    // 背もたれ
+    paint.color = Colors.green[700]!;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, size.height * 0.52, size.width, size.height * 0.09),
+        const Radius.circular(18),
+      ),
       paint,
     );
-
-    // 横の仕切り
-    final dividerHeight = 10.0;
-    final dividerY = size.height / 2 - dividerHeight / 2;
-    canvas.drawRect(
-      Rect.fromLTWH(windowLeft, dividerY, windowWidth, dividerHeight),
+    // 窓
+    paint.color = Colors.white;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(size.width * 0.08, size.height * 0.18, size.width * 0.84, size.height * 0.18),
+        const Radius.circular(16),
+      ),
       paint,
     );
+    // つり革
+    paint.color = Colors.grey[400]!;
+    for (int i = 0; i < 6; i++) {
+      final x = size.width * (0.15 + i * 0.13);
+      final y = size.height * 0.13;
+      // 紐
+      paint.strokeWidth = 4;
+      canvas.drawLine(Offset(x, y), Offset(x, y + 30), paint);
+      // 輪
+      paint.style = PaintingStyle.stroke;
+      paint.strokeWidth = 3;
+      canvas.drawCircle(Offset(x, y + 40), 10, paint);
+      paint.style = PaintingStyle.fill;
+    }
   }
 
   @override
-  bool shouldRepaint(TrainWindowPainter oldDelegate) => false;
+  bool shouldRepaint(CustomPainter oldDelegate) => false;
+}
+
+class FaceLandmarkPainter extends CustomPainter {
+  final Face face;
+  final Size previewSize;
+  final bool isFrontCamera;
+  final double displayW;
+  final double displayH;
+  FaceLandmarkPainter(this.face, this.previewSize, this.isFrontCamera, this.displayW, this.displayH);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // カメラプレビューの表示サイズに合わせてスケーリング
+    final scaleX = displayW / previewSize.width;
+    final scaleY = displayH / previewSize.height;
+    final paintPoint = Paint()
+      ..color = Colors.red
+      ..style = PaintingStyle.fill;
+    final paintLine = Paint()
+      ..color = Colors.green
+      ..strokeWidth = 2;
+
+    Offset transform(Offset p) {
+      double x = p.dx.toDouble() * scaleX;
+      double y = p.dy.toDouble() * scaleY;
+      if (isFrontCamera) {
+        x = displayW - x;
+      }
+      return Offset(x, y);
+    }
+
+    for (final landmarkType in FaceLandmarkType.values) {
+      final landmark = face.landmarks[landmarkType];
+      if (landmark != null) {
+        final offset = transform(Offset(landmark.position.x.toDouble(), landmark.position.y.toDouble()));
+        canvas.drawCircle(offset, 5, paintPoint);
+      }
+    }
+    void drawLine(FaceLandmarkType a, FaceLandmarkType b) {
+      final la = face.landmarks[a];
+      final lb = face.landmarks[b];
+      if (la != null && lb != null) {
+        final offsetA = transform(Offset(la.position.x.toDouble(), la.position.y.toDouble()));
+        final offsetB = transform(Offset(lb.position.x.toDouble(), lb.position.y.toDouble()));
+        canvas.drawLine(offsetA, offsetB, paintLine);
+      }
+    }
+    drawLine(FaceLandmarkType.leftEye, FaceLandmarkType.rightEye);
+    drawLine(FaceLandmarkType.leftEye, FaceLandmarkType.noseBase);
+    drawLine(FaceLandmarkType.rightEye, FaceLandmarkType.noseBase);
+    drawLine(FaceLandmarkType.noseBase, FaceLandmarkType.leftMouth);
+    drawLine(FaceLandmarkType.noseBase, FaceLandmarkType.rightMouth);
+    drawLine(FaceLandmarkType.leftMouth, FaceLandmarkType.rightMouth);
+  }
+
+  @override
+  bool shouldRepaint(covariant FaceLandmarkPainter oldDelegate) => true;
 } 
