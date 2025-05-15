@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'screens/eye_detection_screen.dart';
+import 'screens/eye_detection/eye_detection_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
