@@ -325,32 +325,107 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     _stopCamera(); 
   }
 
-  void _showGameOver({String? message}) { 
-    String dialogMessage = message ?? 'ゲームオーバー'; 
-
+  void _showGameOver({String? message, bool isClear = false}) {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('ゲームオーバー'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(dialogMessage),
-            const SizedBox(height: 10),
-            Text('スコア: $_score'),
-            const SizedBox(height: 10),
-            Text('連続で目を閉じた回数: $_consecutiveBlinkCount'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: const Text('OK'),
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        child: Container(
+          padding: const EdgeInsets.all(28),
+          constraints: const BoxConstraints(maxWidth: 400),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: isClear
+                  ? [Color(0xFFFFF8E1), Color(0xFFFFECB3)]
+                  : [Color(0xFFF8BBD0), Color(0xFFF48FB1)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 16,
+                offset: Offset(0, 6),
+              ),
+            ],
           ),
-        ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isClear ? Icons.emoji_events : Icons.sentiment_very_dissatisfied,
+                color: isClear ? Colors.amber[800] : Colors.redAccent,
+                size: 60,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                isClear ? 'ゲームクリア！' : 'ゲームオーバー',
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.bold,
+                  color: isClear ? Colors.amber[800] : Colors.redAccent,
+                  letterSpacing: 2,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                message ?? (isClear ? 'おめでとうございます！' : 'また挑戦してね！'),
+                style: const TextStyle(fontSize: 18, color: Colors.black87, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isClear ? Colors.amber[100] : Colors.pink[100],
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.star, color: Colors.orange, size: 28),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'SCORE',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orange,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      '$_score',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.deepOrange,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _resetToTitle();
+                },
+                icon: const Icon(Icons.home),
+                label: const Text('タイトルへ戻る'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isClear ? Colors.amber : Colors.pinkAccent,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                  elevation: 8,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -844,7 +919,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                             _isGameOver = true;
                             _isGameStarted = false;
                             _stationTimer?.cancel();
-                            _showGameOver(message: 'ゲームクリア！福工大前で降りました！');
+                            _showGameOver(message: 'ゲームクリア！福工大前で降りました！', isClear: true);
                           } else {
                             _isGameOver = true;
                             _isGameStarted = false;
