@@ -1,13 +1,10 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'dart:ui' as ui;
-import 'dart:math';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart' show InputImage, InputImageData, InputImagePlaneMetadata;
 
 class EyeDetectionScreen extends StatefulWidget {
@@ -64,11 +61,11 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   bool _wasEyesOpen = true;
   bool _isGameOver = false;
   int _consecutiveBlinkCount = 0;
-  static const int MAX_CONSECUTIVE_BLINKS = 3;
-  static const int GAME_DURATION_SECONDS = 30;
+  // static const int GAME_DURATION_SECONDS = 30; // 時間制限を削除
   static const int STATION_CHANGE_SECONDS = 3; // 5から3に変更
   static const double EYE_CLOSED_THRESHOLD = 0.2;
   static const int SCORE_PER_BLINK = 10;
+  static const int MAX_CONSECUTIVE_BLINKS = 5; // Example value, adjust as needed
 
   @override
   void initState() {
@@ -263,18 +260,18 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     await _initializeCamera();
     print('カメラ初期化完了');
 
-    _gameTimer?.cancel();
-    _gameTimer = Timer(Duration(seconds: GAME_DURATION_SECONDS), () {
-      print('ゲームタイマー終了');
-      if (!_isGameOver) { // まだ他の理由でゲームオーバーになっていない場合
-        setState(() {
-          _isGameOver = true;
-          _isGameStarted = false;
-        });
-        _stationTimer?.cancel(); // 駅タイマーも止める
-        _showGameOver(message: '時間切れです！');
-      }
-    });
+    // _gameTimer?.cancel(); // 時間制限タイマー関連を削除
+    // _gameTimer = Timer(Duration(seconds: GAME_DURATION_SECONDS), () {
+    //   print('ゲームタイマー終了');
+    //   if (!_isGameOver) { 
+    //     setState(() {
+    //       _isGameOver = true;
+    //       _isGameStarted = false;
+    //     });
+    //     _stationTimer?.cancel(); 
+    //     _showGameOver(message: '時間切れです！');
+    //   }
+    // });
 
     _startStationTimer();
     print('駅タイマー開始');
@@ -292,11 +289,10 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
           _currentStationIndex++;
           _currentStation = _stations[_currentStationIndex];
         } else {
-          // 終点（リストの最後の駅）をすでに表示していて、さらにタイマーが進んだ場合
           _isGameOver = true;
           _isGameStarted = false;
           timer.cancel();
-          _gameTimer?.cancel(); // ゲームタイマーも止める
+          // _gameTimer?.cancel(); // 時間制限タイマー関連を削除
           _showGameOver(message: '終点の${_stations.last}を通り過ぎました！');
         }
       });
@@ -310,11 +306,10 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       _score += SCORE_PER_BLINK;
       _consecutiveBlinkCount++;
       
-      // 連続で目を閉じすぎるとゲームオーバー
       if (_consecutiveBlinkCount >= MAX_CONSECUTIVE_BLINKS) {
         _isGameOver = true;
         _isGameStarted = false;
-        _gameTimer?.cancel();
+        // _gameTimer?.cancel(); // 時間制限タイマー関連を削除
         _stationTimer?.cancel();
         _showGameOver(message: '連続で目を閉じすぎました！');
       }
@@ -330,27 +325,17 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       _currentStationIndex = 0;
       _consecutiveBlinkCount = 0;
       _wasEyesOpen = true;
-      _isDebugMode = false; // デバッグモードもオフにするか、維持するかは要件次第
+      _isDebugMode = false; 
       _debugStatus = '';
       _debugFace = null;
     });
-    _gameTimer?.cancel();
+    // _gameTimer?.cancel(); // 時間制限タイマー関連を削除
     _stationTimer?.cancel();
-    _stopCamera(); // カメラを停止
-    // アニメーションコントローラーもリセットまたは停止が必要な場合はここに追加
+    _stopCamera(); 
   }
 
-  void _showGameOver({String? message}) { // message引数を追加
-    String dialogMessage = message ?? 'ゲームオーバー'; // デフォルトメッセージ
-    // 基山駅クリアのメッセージは _showGameClear で処理するので、ここでは汎用的なゲームオーバーメッセージ
-    // この条件分岐は、messageがnullの場合のフォールバックとして機能させる意図だったが、
-    // 各呼び出し元でmessageを指定するため、この分岐は不要になるか、より明確な条件が必要。
-    // 今回は呼び出し元で指定されたmessageを優先する。
-    // if (message == null && _isGameOver && _consecutiveBlinkCount >= MAX_CONSECUTIVE_BLINKS) {
-    //   dialogMessage = '連続で目を閉じすぎました！';
-    // } else if (message == null && _isGameOver) {
-    //   dialogMessage = '時間切れです！';
-    // }
+  void _showGameOver({String? message}) { 
+    String dialogMessage = message ?? 'ゲームオーバー'; 
 
     showDialog(
       context: context,
@@ -361,34 +346,6 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(dialogMessage), // 表示するメッセージを引数から受け取る
-            const SizedBox(height: 10),
-            Text('スコア: $_score'),
-            const SizedBox(height: 10),
-            Text('連続で目を閉じた回数: $_consecutiveBlinkCount'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showGameClear() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('ゲームクリア！'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('基山駅に到着しました！'),
             const SizedBox(height: 10),
             Text('スコア: $_score'),
             const SizedBox(height: 10),
@@ -425,7 +382,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _gameTimer?.cancel();
+    // _gameTimer?.cancel(); // 時間制限タイマー関連を削除
     _stationTimer?.cancel();
     _stopCamera();
     _faceDetector.close();
