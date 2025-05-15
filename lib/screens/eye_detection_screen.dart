@@ -37,12 +37,26 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   late AnimationController _animationController;
   late Animation<double> _sceneryAnimation;
   final List<String> _stations = [
-    '福工大前',
-    '水城',
-    '二日市',
-    '天拝山',
+    '基山駅',
+    'けやき台',
     '原田',
-    '基山'
+    '天拝山',
+    '二日市',
+    '都府楼南',
+    '水城',
+    '大野城',
+    '春日',
+    '南福岡',
+    '笹原',
+    '竹下',
+    '博多',
+    '吉塚',
+    '箱崎',
+    '千早',
+    '香椎',
+    '九産大前',
+    '福工大前',
+    '新宮中央'
   ];
   int _currentStationIndex = 0;
   double _sceneryOffset = 0.0;
@@ -52,7 +66,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   int _consecutiveBlinkCount = 0;
   static const int MAX_CONSECUTIVE_BLINKS = 3;
   static const int GAME_DURATION_SECONDS = 30;
-  static const int STATION_CHANGE_SECONDS = 5;
+  static const int STATION_CHANGE_SECONDS = 3; // 5から3に変更
   static const double EYE_CLOSED_THRESHOLD = 0.2;
   static const int SCORE_PER_BLINK = 10;
 
@@ -252,12 +266,13 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     _gameTimer?.cancel();
     _gameTimer = Timer(Duration(seconds: GAME_DURATION_SECONDS), () {
       print('ゲームタイマー終了');
-      if (!_isGameOver) {
+      if (!_isGameOver) { // まだ他の理由でゲームオーバーになっていない場合
         setState(() {
           _isGameOver = true;
           _isGameStarted = false;
         });
-        _showGameOver();
+        _stationTimer?.cancel(); // 駅タイマーも止める
+        _showGameOver(message: '時間切れです！');
       }
     });
 
@@ -277,11 +292,12 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
           _currentStationIndex++;
           _currentStation = _stations[_currentStationIndex];
         } else {
-          // 基山駅に到着したらゲームクリア
+          // 終点（リストの最後の駅）をすでに表示していて、さらにタイマーが進んだ場合
           _isGameOver = true;
           _isGameStarted = false;
           timer.cancel();
-          _showGameClear();
+          _gameTimer?.cancel(); // ゲームタイマーも止める
+          _showGameOver(message: '終点の${_stations.last}を通り過ぎました！');
         }
       });
     });
@@ -300,13 +316,42 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         _isGameStarted = false;
         _gameTimer?.cancel();
         _stationTimer?.cancel();
-        _showGameOver();
+        _showGameOver(message: '連続で目を閉じすぎました！');
       }
     });
   }
 
-  void _showGameOver() {
-    String message = _isGameOver ? '連続で目を閉じすぎました！' : '時間切れです！';
+  void _resetToTitle() {
+    setState(() {
+      _isGameStarted = false;
+      _isGameOver = false;
+      _score = 0;
+      _currentStation = '';
+      _currentStationIndex = 0;
+      _consecutiveBlinkCount = 0;
+      _wasEyesOpen = true;
+      _isDebugMode = false; // デバッグモードもオフにするか、維持するかは要件次第
+      _debugStatus = '';
+      _debugFace = null;
+    });
+    _gameTimer?.cancel();
+    _stationTimer?.cancel();
+    _stopCamera(); // カメラを停止
+    // アニメーションコントローラーもリセットまたは停止が必要な場合はここに追加
+  }
+
+  void _showGameOver({String? message}) { // message引数を追加
+    String dialogMessage = message ?? 'ゲームオーバー'; // デフォルトメッセージ
+    // 基山駅クリアのメッセージは _showGameClear で処理するので、ここでは汎用的なゲームオーバーメッセージ
+    // この条件分岐は、messageがnullの場合のフォールバックとして機能させる意図だったが、
+    // 各呼び出し元でmessageを指定するため、この分岐は不要になるか、より明確な条件が必要。
+    // 今回は呼び出し元で指定されたmessageを優先する。
+    // if (message == null && _isGameOver && _consecutiveBlinkCount >= MAX_CONSECUTIVE_BLINKS) {
+    //   dialogMessage = '連続で目を閉じすぎました！';
+    // } else if (message == null && _isGameOver) {
+    //   dialogMessage = '時間切れです！';
+    // }
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -315,7 +360,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(message),
+            Text(dialogMessage), // 表示するメッセージを引数から受け取る
             const SizedBox(height: 10),
             Text('スコア: $_score'),
             const SizedBox(height: 10),
@@ -390,14 +435,13 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
 
   @override
   Widget build(BuildContext context) {
-    print('build: _isGameStarted=$_isGameStarted, _isGameOver=$_isGameOver');
     return Scaffold(
       body: Stack(
         children: [
           // 背景
           Positioned.fill(
             child: Container(
-              decoration: BoxDecoration(
+                    decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
@@ -405,9 +449,9 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                     Colors.blue[900]!,
                     Colors.blue[700]!,
                   ],
-                ),
-              ),
-            ),
+                      ),
+                    ),
+                  ),
           ),
           // 電車のイラスト（背景）
           Positioned(
@@ -442,34 +486,39 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                       );
                     },
                     child: Column(
-                      children: [
-                        const Text(
-                          '目を閉じて',
+                children: [
+                  const Text(
+                          '寝過ごしパニック',
                           style: TextStyle(
-                            fontSize: 48,
+                            fontSize: 44,
                             fontWeight: FontWeight.bold,
                             color: Colors.white,
+                            letterSpacing: 2.5,
+                            fontFamily: 'Roboto',
                             shadows: [
                               Shadow(
-                                color: Colors.black26,
+                                color: Colors.black38,
                                 offset: Offset(2, 2),
-                                blurRadius: 4,
+                                blurRadius: 6,
                               ),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        const Text(
-                          '電車に乗ろう！',
-                          style: TextStyle(
-                            fontSize: 36,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            shadows: [
+                        const SizedBox(height: 12),
+                        // STAGE3 おしゃれ表記
+                        Text(
+                          'STAGE3',
+                    style: TextStyle(
+                      fontSize: 32,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.amber[300],
+                            letterSpacing: 8,
+                            fontFamily: 'RobotoMono',
+                            shadows: const [
                               Shadow(
-                                color: Colors.black26,
-                                offset: Offset(2, 2),
-                                blurRadius: 4,
+                                color: Colors.black54,
+                                offset: Offset(0, 3),
+                                blurRadius: 8,
                               ),
                             ],
                           ),
@@ -494,15 +543,15 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                             'スタート',
                             style: TextStyle(
                               fontSize: 24,
-                              fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.bold,
                             ),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
                         // デバッグモードボタン
-                        ElevatedButton(
-                          onPressed: _toggleDebugMode,
-                          style: ElevatedButton.styleFrom(
+                  ElevatedButton(
+                    onPressed: _toggleDebugMode,
+                    style: ElevatedButton.styleFrom(
                             backgroundColor: _isDebugMode ? Colors.red : Colors.grey[700],
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(
@@ -537,7 +586,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                       child: const Column(
                         children: [
                           Text(
-                            '目を閉じると景色が動きます',
+                            '寝過ごさないように気をつけろ！',
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: 18,
@@ -545,7 +594,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                           ),
                           SizedBox(height: 10),
                           Text(
-                            '目を開けると景色が止まります',
+                            '目を閉じてる時間が長いほどスコアUP！',
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: 18,
@@ -568,8 +617,8 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                     adjustedPreviewSize = Size(adjustedPreviewSize.height, adjustedPreviewSize.width);
                   }
                   return Center(
-                    child: AspectRatio(
-                      aspectRatio: 1 / _controller!.value.aspectRatio,
+              child: AspectRatio(
+                aspectRatio: 1 / _controller!.value.aspectRatio,
                       child: LayoutBuilder(
                         builder: (context, constraints) {
                           final previewW = constraints.maxWidth;
@@ -629,78 +678,52 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                   ),
                 ),
                 // 4. 上部情報バー（駅名・残り時間・スコア）
-                Positioned(
+            Positioned(
                   top: 32,
                   left: 0,
                   right: 0,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // 残り時間
-                      Container(
-                        margin: const EdgeInsets.only(left: 16),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.95),
-                          borderRadius: BorderRadius.circular(18),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.13),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.timer, color: Colors.blueGrey, size: 22),
-                            const SizedBox(width: 6),
-                            Text(
-                              '${GAME_DURATION_SECONDS - (_gameTimer?.tick ?? 0)}秒',
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
                       // 駅名（中央）
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: Colors.blue[800]!.withOpacity(0.95),
-                          borderRadius: BorderRadius.circular(22),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.13),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.train, color: Colors.white, size: 26),
-                            const SizedBox(width: 10),
-                            Text(
-                              _currentStation,
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                                letterSpacing: 2,
+                      Expanded( // Expandedを追加して中央寄せを維持
+                        child: Container(
+                          alignment: Alignment.center, // 中央に配置
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[800]!.withOpacity(0.95),
+                            borderRadius: BorderRadius.circular(22),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.13),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min, // Rowの内容物のサイズに合わせる
+                            children: [
+                              const Icon(Icons.train, color: Colors.white, size: 26),
+                              const SizedBox(width: 10),
+                              Text(
+                                _currentStation,
+                                style: const TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                  letterSpacing: 2,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       // スコア（右）
                       Container(
                         margin: const EdgeInsets.only(right: 16),
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        decoration: BoxDecoration(
+                decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.95),
                           borderRadius: BorderRadius.circular(18),
                           boxShadow: [
@@ -738,14 +761,39 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                     decoration: BoxDecoration(
                       color: Colors.black.withOpacity(0.65),
                       borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Text(
-                      _debugStatus,
-                      style: const TextStyle(
-                        color: Colors.white,
+                ),
+                child: Text(
+                  _debugStatus,
+                  style: const TextStyle(
+                    color: Colors.white,
                         fontSize: 15,
                         fontWeight: FontWeight.w500,
                       ),
+                    ),
+                  ),
+                ),
+                // タイトルへ戻るボタン (左下に戻す)
+                Positioned(
+                  left: 16,
+                  bottom: 32,
+                  child: ElevatedButton(
+                    onPressed: _resetToTitle,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.redAccent,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.arrow_back, color: Colors.white),
+                        SizedBox(width: 8),
+                        Text(
+                          'タイトルへ',
+                          style: TextStyle(fontSize: 16, color: Colors.white),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -886,8 +934,8 @@ class AnimatedSceneryWidget extends StatelessWidget {
             Positioned.fill(
               child: Container(
                 color: Colors.black.withOpacity(0.7),
-              ),
             ),
+          ),
         ],
       ),
     );
@@ -907,13 +955,13 @@ class TrainInteriorPainter extends CustomPainter {
     // 座席（区切りあり）
     for (int i = 0; i < 5; i++) {
       paint.color = i % 2 == 0 ? Colors.green[400]! : Colors.green[600]!;
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
           Rect.fromLTWH(size.width * 0.05 + i * size.width * 0.18, size.height * 0.6, size.width * 0.16, size.height * 0.12),
-          const Radius.circular(18),
-        ),
-        paint,
-      );
+        const Radius.circular(18),
+      ),
+      paint,
+    );
     }
     // 座席端の仕切り
     paint.color = Colors.grey[700]!;
@@ -954,18 +1002,18 @@ class TrainInteriorPainter extends CustomPainter {
     // つり革（2列、奥行き感）
     paint.color = Colors.grey[400]!;
     for (int row = 0; row < 2; row++) {
-      for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 6; i++) {
         final x = size.width * (0.15 + i * 0.13) + row * 10;
         final y = size.height * 0.13 + row * 18;
-        // 紐
-        paint.strokeWidth = 4;
-        canvas.drawLine(Offset(x, y), Offset(x, y + 30), paint);
-        // 輪
-        paint.style = PaintingStyle.stroke;
-        paint.strokeWidth = 3;
-        canvas.drawCircle(Offset(x, y + 40), 10, paint);
-        paint.style = PaintingStyle.fill;
-      }
+      // 紐
+      paint.strokeWidth = 4;
+      canvas.drawLine(Offset(x, y), Offset(x, y + 30), paint);
+      // 輪
+      paint.style = PaintingStyle.stroke;
+      paint.strokeWidth = 3;
+      canvas.drawCircle(Offset(x, y + 40), 10, paint);
+      paint.style = PaintingStyle.fill;
+    }
     }
     // ドア
     paint.color = Colors.grey[600]!;
@@ -1038,4 +1086,4 @@ class FaceLandmarkPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant FaceLandmarkPainter oldDelegate) => true;
-} 
+}
