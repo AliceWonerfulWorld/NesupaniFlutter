@@ -1,3 +1,4 @@
+//自動デプロイのテスト
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
