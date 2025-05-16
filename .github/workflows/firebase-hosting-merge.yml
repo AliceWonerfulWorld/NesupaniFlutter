@@ -14,7 +14,7 @@ jobs:
         uses: subosito/flutter-action@v2 # https://github.com/subosito/flutter-action
         with:
           channel: 'stable'
-          flutter-version: 3.16.9 # プロジェクトの Flutter バージョンに合わせる
+          flutter-version: 3.29.2 # プロジェクトの Flutter バージョンに合わせる
       - name: Get Flutter dependencies
         run: flutter pub get
       - run: flutter build web
