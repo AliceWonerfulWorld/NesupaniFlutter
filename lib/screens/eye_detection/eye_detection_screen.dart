@@ -5,6 +5,32 @@ import 'package:nesupani/screens/eye_detection/painters/train_interior_painter.d
 import 'package:nesupani/screens/eye_detection/painters/face_landmark_painter.dart';
 import 'package:nesupani/screens/eye_detection/widgets/animated_scenery_widget.dart';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:js/js.dart';
+import 'package:universal_html/html.dart' as html;
+
+@JS()
+@anonymous
+class FaceDetectionOptions {
+  external factory FaceDetectionOptions();
+  external dynamic get tinyFaceDetector;
+}
+
+@JS()
+@anonymous
+class FaceDetection {
+  external factory FaceDetection();
+  external dynamic get landmarks;
+}
+
+@JS('faceapi')
+external dynamic get faceapi;
+
+@JS('faceapi.nets')
+external dynamic get nets;
+
+@JS('faceapi.detectSingleFace')
+external Future<FaceDetection?> detectSingleFace(dynamic input, dynamic options);
 
 class EyeDetectionScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -68,6 +94,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initializeCamera();
+    _initializeFaceAPI();
     _faceDetector = FaceDetector(
       options: FaceDetectorOptions(
         performanceMode: FaceDetectorMode.accurate, // 高精度モード
@@ -154,84 +181,152 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     }
   }
 
+  Future<void> _initializeFaceAPI() async {
+    if (kIsWeb) {
+      try {
+        // Face-API.jsのモデルをロード
+        await nets.tinyFaceDetector.loadFromUri('/models');
+        await nets.faceLandmark68Net.loadFromUri('/models');
+        await nets.faceRecognitionNet.loadFromUri('/models');
+        await nets.faceExpressionNet.loadFromUri('/models');
+        print('Face-API.js models loaded successfully');
+      } catch (e) {
+        print('Error loading Face-API.js models: $e');
+      }
+    }
+  }
+
   Future<void> _processImage(CameraImage image) async {
     if (!_isGameStarted && !_isDebugMode) return;
     if (_isProcessing || _isGameOver) return;
 
     _isProcessing = true;
     try {
-      final Size imageSize = Size(image.width.toDouble(), image.height.toDouble());
-      final rotation = _controller!.description.sensorOrientation;
+      if (kIsWeb) {
+        // Web用の顔認識処理
+        final canvas = html.CanvasElement()
+          ..width = image.width
+          ..height = image.height;
+        final ctx = canvas.context2D;
+        
+        // 画像データをCanvasに描画
+        final imageData = ctx.createImageData(image.width, image.height);
+        imageData.data.setAll(0, image.planes[0].bytes);
+        ctx.putImageData(imageData, 0, 0);
 
-      // デバッグログを追加
-      print('Processing image with width: ${image.width}, height: ${image.height}');
+        // Face-API.jsで顔を検出
+        final detection = await detectSingleFace(
+          canvas,
+          nets.tinyFaceDetector.options,
+        );
 
-      final inputImage = InputImage.fromBytes(
-        bytes: image.planes[0].bytes,
-        metadata: InputImageMetadata(
-          size: imageSize,
-          rotation: InputImageRotation.values[rotation ~/ 90],
-          format: InputImageFormat.yuv420,
-          bytesPerRow: image.planes[0].bytesPerRow,
-        ),
-      );
+        if (detection == null) {
+          setState(() {
+            _debugStatus = '顔が検出されていません';
+            _debugFace = null;
+          });
+          return;
+        }
 
-      final faces = await _faceDetector.processImage(inputImage);
-      if (faces.isEmpty) {
+        // 目の状態を取得
+        final landmarks = detection.landmarks;
+        final leftEye = _getEyePoints(landmarks, true);
+        final rightEye = _getEyePoints(landmarks, false);
+        
+        // 目の開閉状態を判定
+        final leftEyeOpen = _isEyeOpen(leftEye);
+        final rightEyeOpen = _isEyeOpen(rightEye);
+
         setState(() {
-          _debugStatus = '顔が検出されていません';
-          _debugFace = null;
+          _debugStatus = '左目: ${leftEyeOpen ? "開" : "閉"}\n右目: ${rightEyeOpen ? "開" : "閉"}';
+          _isEyesOpen = leftEyeOpen || rightEyeOpen;
         });
-        print('processImage: 顔が検出されていません, _isGameStarted=$_isGameStarted, _isDebugMode=$_isDebugMode');
-        return;
-      }
 
-      final face = faces.first;
-      if (face.leftEyeOpenProbability == null || face.rightEyeOpenProbability == null) {
+        if (_isGameStarted && _wasEyesOpen && !leftEyeOpen && !rightEyeOpen) {
+          _addScore();
+        }
+        _wasEyesOpen = leftEyeOpen || rightEyeOpen;
+
+        if (_isEyesOpen) {
+          setState(() {
+            _consecutiveBlinkCount = 0;
+          });
+        }
+      } else {
+        // 既存のモバイル用顔認識処理
+        final Size imageSize = Size(image.width.toDouble(), image.height.toDouble());
+        final rotation = _controller!.description.sensorOrientation;
+
+        // デバッグログを追加
+        print('Processing image with width: ${image.width}, height: ${image.height}');
+
+        final inputImage = InputImage.fromBytes(
+          bytes: image.planes[0].bytes,
+          metadata: InputImageMetadata(
+            size: imageSize,
+            rotation: InputImageRotation.values[rotation ~/ 90],
+            format: InputImageFormat.yuv420,
+            bytesPerRow: image.planes[0].bytesPerRow,
+          ),
+        );
+
+        final faces = await _faceDetector.processImage(inputImage);
+        if (faces.isEmpty) {
+          setState(() {
+            _debugStatus = '顔が検出されていません';
+            _debugFace = null;
+          });
+          print('processImage: 顔が検出されていません, _isGameStarted=$_isGameStarted, _isDebugMode=$_isDebugMode');
+          return;
+        }
+
+        final face = faces.first;
+        if (face.leftEyeOpenProbability == null || face.rightEyeOpenProbability == null) {
+          setState(() {
+            _debugStatus = '目の状態を検出できません';
+          });
+          print('processImage: 目の状態を検出できません, _isGameStarted=$_isGameStarted, _isDebugMode=$_isDebugMode');
+          return;
+        }
+
+        final isFrontCamera = _controller!.description.lensDirection == CameraLensDirection.front;
+        final leftProb = isFrontCamera
+            ? face.rightEyeOpenProbability ?? 1.0 // フロントカメラの場合、左右を入れ替え
+            : face.leftEyeOpenProbability ?? 1.0;
+        final rightProb = isFrontCamera
+            ? face.leftEyeOpenProbability ?? 1.0 // フロントカメラの場合、左右を入れ替え
+            : face.rightEyeOpenProbability ?? 1.0;
+
+        final leftEyeClosed = leftProb < EYE_CLOSED_THRESHOLD;
+        final rightEyeClosed = rightProb < EYE_CLOSED_THRESHOLD;
+
+        // デバッグログを追加
+        print('Left Eye Probability: $leftProb, Closed: $leftEyeClosed');
+        print('Right Eye Probability: $rightProb, Closed: $rightEyeClosed');
+
+        final leftEyeOpen = !leftEyeClosed;
+        final rightEyeOpen = !rightEyeClosed;
+
         setState(() {
-          _debugStatus = '目の状態を検出できません';
+          _debugStatus = '左目: ${leftEyeOpen ? "開" : "閉"}\n右目: ${rightEyeOpen ? "開" : "閉"}';
+          _isEyesOpen = leftEyeOpen || rightEyeOpen; // 両目が閉じた場合のみ閉じたと判定
+          _debugFace = face;
         });
-        print('processImage: 目の状態を検出できません, _isGameStarted=$_isGameStarted, _isDebugMode=$_isDebugMode');
-        return;
-      }
+        print('processImage: _isGameStarted=$_isGameStarted, _isDebugMode=$_isDebugMode, left: $leftEyeOpen, right: $rightEyeOpen');
 
-      final isFrontCamera = _controller!.description.lensDirection == CameraLensDirection.front;
-      final leftProb = isFrontCamera
-          ? face.rightEyeOpenProbability ?? 1.0 // フロントカメラの場合、左右を入れ替え
-          : face.leftEyeOpenProbability ?? 1.0;
-      final rightProb = isFrontCamera
-          ? face.leftEyeOpenProbability ?? 1.0 // フロントカメラの場合、左右を入れ替え
-          : face.rightEyeOpenProbability ?? 1.0;
+        // 「開→完全に両目が閉じた瞬間」だけ加算
+        if (_isGameStarted && _wasEyesOpen && leftEyeClosed && rightEyeClosed) {
+          _addScore();
+          print('スコア加算!');
+        }
+        _wasEyesOpen = leftEyeOpen || rightEyeOpen;
 
-      final leftEyeClosed = leftProb < EYE_CLOSED_THRESHOLD;
-      final rightEyeClosed = rightProb < EYE_CLOSED_THRESHOLD;
-
-      // デバッグログを追加
-      print('Left Eye Probability: $leftProb, Closed: $leftEyeClosed');
-      print('Right Eye Probability: $rightProb, Closed: $rightEyeClosed');
-
-      final leftEyeOpen = !leftEyeClosed;
-      final rightEyeOpen = !rightEyeClosed;
-
-      setState(() {
-        _debugStatus = '左目: ${leftEyeOpen ? "開" : "閉"}\n右目: ${rightEyeOpen ? "開" : "閉"}';
-        _isEyesOpen = leftEyeOpen || rightEyeOpen; // 両目が閉じた場合のみ閉じたと判定
-        _debugFace = face;
-      });
-      print('processImage: _isGameStarted=$_isGameStarted, _isDebugMode=$_isDebugMode, left: $leftEyeOpen, right: $rightEyeOpen');
-
-      // 「開→完全に両目が閉じた瞬間」だけ加算
-      if (_isGameStarted && _wasEyesOpen && leftEyeClosed && rightEyeClosed) {
-        _addScore();
-        print('スコア加算!');
-      }
-      _wasEyesOpen = leftEyeOpen || rightEyeOpen;
-
-      // 目が開いたら連続カウントをリセット
-      if (_isEyesOpen) {
-        setState(() {
-          _consecutiveBlinkCount = 0;
-        });
+        // 目が開いたら連続カウントをリセット
+        if (_isEyesOpen) {
+          setState(() {
+            _consecutiveBlinkCount = 0;
+          });
+        }
       }
     } catch (e) {
       print('画像処理エラー: $e');
@@ -241,6 +336,33 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     } finally {
       _isProcessing = false;
     }
+  }
+
+  List<Map<String, double>> _getEyePoints(dynamic landmarks, bool isLeftEye) {
+    final points = <Map<String, double>>[];
+    final start = isLeftEye ? 36 : 42;
+    final end = isLeftEye ? 41 : 47;
+    
+    for (var i = start; i <= end; i++) {
+      final point = landmarks.getPoint(i);
+      points.add({
+        'x': point.x.toDouble(),
+        'y': point.y.toDouble(),
+      });
+    }
+    return points;
+  }
+
+  bool _isEyeOpen(List<Map<String, double>> eyePoints) {
+    if (eyePoints.length < 6) return true;
+    
+    // 目の高さと幅の比率を計算
+    final height = (eyePoints[1]['y']! - eyePoints[5]['y']!).abs();
+    final width = (eyePoints[0]['x']! - eyePoints[3]['x']!).abs();
+    final ratio = height / width;
+    
+    // 比率が一定値より小さい場合は目が開いていると判定
+    return ratio > 0.25;
   }
 
   void _startGame() async {
