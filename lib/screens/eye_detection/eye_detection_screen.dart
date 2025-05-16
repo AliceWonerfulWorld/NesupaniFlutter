@@ -8,6 +8,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:js/js.dart';
 import 'package:universal_html/html.dart' as html;
+import 'dart:ui' as ui;
 
 @JS()
 @anonymous
@@ -88,11 +89,37 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   static const double EYE_CLOSED_THRESHOLD = 0.3; // しきい値を調整
   static const int SCORE_PER_BLINK = 10;
   static const int MAX_CONSECUTIVE_BLINKS = 5;
+  Timer? _webDetectTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (kIsWeb) {
+      // viewType 'webcam-video' を登録（initStateで一度だけ）
+      // ignore: undefined_prefixed_name
+      ui.platformViewRegistry.registerViewFactory(
+        'webcam-video',
+        (int viewId) {
+          final video = html.document.getElementById('webcam-video') as html.VideoElement?;
+          if (video != null) {
+            video.style.display = 'block';
+            return video;
+          } else {
+            final newVideo = html.VideoElement()
+              ..autoplay = true
+              ..width = 640
+              ..height = 480
+              ..id = 'webcam-video';
+            html.window.navigator.mediaDevices?.getUserMedia({'video': true}).then((stream) {
+              newVideo.srcObject = stream;
+            });
+            html.document.body?.append(newVideo);
+            return newVideo;
+          }
+        },
+      );
+    }
     _initializeCamera();
     _initializeFaceAPI();
     _faceDetector = FaceDetector(
@@ -104,12 +131,10 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         enableLandmarks: true,
       ),
     );
-
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 20),
     )..repeat();
-
     _sceneryAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -134,6 +159,14 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   }
 
   Future<void> _stopCamera() async {
+    if (kIsWeb) {
+      // Web用: video要素を削除
+      final video = html.document.getElementById('webcam-video');
+      if (video != null) {
+        video.remove();
+      }
+      return;
+    }
     if (_controller != null) {
       await _controller!.stopImageStream();
       await _controller!.dispose();
@@ -142,34 +175,47 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   }
 
   Future<void> _initializeCamera() async {
+    if (kIsWeb) {
+      // Web用: video要素を作成してbodyに追加
+      final video = html.VideoElement()
+        ..autoplay = true
+        ..width = 640
+        ..height = 480
+        ..style.display = 'none'; // デバッグ時のみ表示したい場合はblockに
+      html.window.navigator.mediaDevices?.getUserMedia({'video': true}).then((stream) {
+        video.srcObject = stream;
+      });
+      video.id = 'webcam-video';
+      // すでにvideo要素があれば追加しない
+      if (html.document.getElementById('webcam-video') == null) {
+        html.document.body?.append(video);
+      }
+      return;
+    }
+
     if (widget.cameras.isEmpty) {
       print('カメラが見つかりません');
       return;
     }
-
     if (_controller != null) {
       await _stopCamera();
     }
-
     final frontCamera = widget.cameras.firstWhere(
       (camera) => camera.lensDirection == CameraLensDirection.front,
       orElse: () => widget.cameras.first,
     );
-
     _controller = CameraController(
       frontCamera,
       ResolutionPreset.medium,
       enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.nv21, // 修正: yuv420からnv21に変更
+      imageFormatGroup: ImageFormatGroup.nv21,
     );
-
     try {
       await _controller!.initialize();
       if (!mounted) {
         await _stopCamera();
         return;
       }
-
       _controller!.startImageStream((image) {
         if (!_isProcessing) {
           _processImage(image);
@@ -185,10 +231,10 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     if (kIsWeb) {
       try {
         // Face-API.jsのモデルをロード
-        await nets.tinyFaceDetector.loadFromUri('/models');
-        await nets.faceLandmark68Net.loadFromUri('/models');
-        await nets.faceRecognitionNet.loadFromUri('/models');
-        await nets.faceExpressionNet.loadFromUri('/models');
+        await nets.tinyFaceDetector.loadFromUri('models');
+        await nets.faceLandmark68Net.loadFromUri('models');
+        await nets.faceRecognitionNet.loadFromUri('models');
+        await nets.faceExpressionNet.loadFromUri('models');
         print('Face-API.js models loaded successfully');
       } catch (e) {
         print('Error loading Face-API.js models: $e');
@@ -552,6 +598,33 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     );
   }
 
+  void _startWebFaceDetectionLoop() {
+    _webDetectTimer?.cancel();
+    _webDetectTimer = Timer.periodic(Duration(milliseconds: 300), (_) async {
+      final video = html.document.getElementById('webcam-video') as html.VideoElement?;
+      if (video != null && video.readyState == 4) {
+        final canvas = html.CanvasElement(width: video.videoWidth, height: video.videoHeight);
+        final ctx = canvas.context2D;
+        ctx.drawImage(video, 0, 0);
+        try {
+          final detection = await detectSingleFace(canvas, nets.tinyFaceDetector.options);
+          setState(() {
+            _debugStatus = detection != null ? '顔検出！' : '顔なし';
+          });
+        } catch (e) {
+          setState(() {
+            _debugStatus = 'エラー: $e';
+          });
+        }
+      }
+    });
+  }
+
+  void _stopWebFaceDetectionLoop() {
+    _webDetectTimer?.cancel();
+    _webDetectTimer = null;
+  }
+
   void _toggleDebugMode() async {
     setState(() {
       _isDebugMode = !_isDebugMode;
@@ -561,8 +634,36 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       }
     });
     if (_isDebugMode) {
-      await _initializeCamera();
+      if (kIsWeb) {
+        // video要素がなければ生成
+        var video = html.document.getElementById('webcam-video') as html.VideoElement?;
+        if (video == null) {
+          video = html.VideoElement()
+            ..autoplay = true
+            ..width = 640
+            ..height = 480
+            ..id = 'webcam-video';
+          await html.window.navigator.mediaDevices?.getUserMedia({'video': true}).then((stream) {
+            video!.srcObject = stream;
+          });
+          html.document.body?.append(video);
+        }
+        setState(() {});
+        _startWebFaceDetectionLoop();
+      } else {
+        await _initializeCamera();
+      }
     } else {
+      if (kIsWeb) {
+        _stopWebFaceDetectionLoop();
+        // video要素のストリーム停止と削除
+        var video = html.document.getElementById('webcam-video') as html.VideoElement?;
+        if (video != null) {
+          video.pause();
+          video.srcObject = null;
+          video.remove();
+        }
+      }
       await _stopCamera();
     }
   }
@@ -823,55 +924,75 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
               ),
             ),
           // デバッグモード時のカメラプレビュー
-          if (_isDebugMode && _controller != null && _controller!.value.isInitialized)
-            Positioned.fill(
-              child: Builder(
-                builder: (context) {
-                  Size adjustedPreviewSize = _controller!.value.previewSize!;
-                  if (MediaQuery.of(context).orientation == Orientation.portrait && adjustedPreviewSize.width > adjustedPreviewSize.height) {
-                    adjustedPreviewSize = Size(adjustedPreviewSize.height, adjustedPreviewSize.width);
-                  }
-                  return Center(
-                    child: AspectRatio(
-                      aspectRatio: 1 / _controller!.value.aspectRatio,
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final previewW = constraints.maxWidth;
-                          final previewH = constraints.maxHeight;
-                          return Stack(
-                            children: [
-                              CameraPreview(_controller!),
-                              if (_debugFace != null)
-                                CustomPaint(
-                                  painter: FaceLandmarkPainter(
-                                    _debugFace!,
-                                    adjustedPreviewSize,
-                                    _controller!.description.lensDirection == CameraLensDirection.front,
-                                    previewW,
-                                    previewH,
-                                  ),
-                                  size: Size(previewW, previewH),
-                                ),
-                              Positioned(
-                                top: 40,
-                                right: 40,
-                                child: ElevatedButton(
-                                  onPressed: _toggleDebugMode,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                  ),
-                                  child: const Text('デバッグモード終了'),
-                                ),
-                              ),
-                            ],
-                          );
-                        },
+          if (_isDebugMode)
+            if (kIsWeb)
+              Positioned.fill(
+                child: Stack(
+                  children: [
+                    HtmlElementView(viewType: 'webcam-video'),
+                    Positioned(
+                      top: 40,
+                      right: 40,
+                      child: ElevatedButton(
+                        onPressed: _toggleDebugMode,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+                        child: const Text('デバッグモード終了'),
                       ),
                     ),
-                  );
-                },
+                  ],
+                ),
+              )
+            else if (_controller != null && _controller!.value.isInitialized)
+              Positioned.fill(
+                child: Builder(
+                  builder: (context) {
+                    Size adjustedPreviewSize = _controller!.value.previewSize!;
+                    if (MediaQuery.of(context).orientation == Orientation.portrait && adjustedPreviewSize.width > adjustedPreviewSize.height) {
+                      adjustedPreviewSize = Size(adjustedPreviewSize.height, adjustedPreviewSize.width);
+                    }
+                    return Center(
+                      child: AspectRatio(
+                        aspectRatio: 1 / _controller!.value.aspectRatio,
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final previewW = constraints.maxWidth;
+                            final previewH = constraints.maxHeight;
+                            return Stack(
+                              children: [
+                                CameraPreview(_controller!),
+                                if (_debugFace != null)
+                                  CustomPaint(
+                                    painter: FaceLandmarkPainter(
+                                      _debugFace!,
+                                      adjustedPreviewSize,
+                                      _controller!.description.lensDirection == CameraLensDirection.front,
+                                      previewW,
+                                      previewH,
+                                    ),
+                                    size: Size(previewW, previewH),
+                                  ),
+                                Positioned(
+                                  top: 40,
+                                  right: 40,
+                                  child: ElevatedButton(
+                                    onPressed: _toggleDebugMode,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                    ),
+                                    child: const Text('デバッグモード終了'),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
           // ゲーム画面
           if (_isGameStarted)
             Builder(
