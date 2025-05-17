@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart' as mlkit_fd; // Alias to avoid conflict
 import 'package:nesupani/screens/eye_detection/painters/train_interior_painter.dart';
 import 'package:nesupani/screens/eye_detection/painters/face_landmark_painter.dart';
+import 'package:nesupani/screens/eye_detection/painters/mediapipe_face_painter.dart'; // MediaPipeFacePainterの追加
 import 'package:nesupani/screens/eye_detection/widgets/animated_scenery_widget.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,7 @@ import 'package:universal_html/html.dart' as html;
 import 'dart:ui' as ui;
 import 'dart:js_util' as js_util;
 import 'dart:ui_web' if (dart.library.io) 'dart:ui' as ui_web;
+import 'dart:math' as math; // math関数を使用するためのインポート
 
 // MediaPipe Task objects will be handled by js_util typically,
 // but if direct JS interop with @JS is needed for some structures, keep js.dart.
@@ -40,6 +42,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   bool _isGameStarted = false;
   int _score = 0;
   Timer? _stationTimer;
+  Timer? _eyesClosedScoreTimer; // 目を閉じている間のスコア加算タイマー
   String _currentStation = '';
   bool _isDebugMode = false;
   String _debugStatus = '';
@@ -53,6 +56,8 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   int _consecutiveStationsWithEyesClosed = 0; // 連続で目を閉じていた駅の数
   static const int STATION_BASE_SCORE = 10; // 基本点（駅ごと）
   static const double CONSECUTIVE_BONUS_MULTIPLIER = 0.5; // 連続ボーナス係数
+  static const int EYES_CLOSED_SCORE_INTERVAL = 200; // 目を閉じている間のスコア加算間隔（ミリ秒）- 短くして反応を早く
+  static const int EYES_CLOSED_SCORE_INCREMENT = 1; // 目を閉じている間の加算量
   
   final List<String> _stations = [
     '基山駅',
@@ -279,9 +284,12 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
           ..autoplay = true
           ..width = 640 // 明示的なサイズ設定が役立つことがある
           ..height = 480
-          ..style.display = 'none';
+          ..style.display = _isDebugMode ? 'block' : 'none'; // デバッグモードでは表示
         video.id = 'webcam-video';
         html.document.body?.append(video);
+      } else {
+        // すでに存在する場合はスタイルを更新
+        video.style.display = _isDebugMode ? 'block' : 'none';
       }
 
       try {
@@ -567,6 +575,8 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     }
 
     _startStationTimer();
+    print('目を閉じているスコア加算タイマー開始');
+    _startEyesClosedScoreTimer(); // 目を閉じている間のスコア加算タイマーを開始
     print('駅タイマー開始 (startGame)');
   }
 
@@ -658,6 +668,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       _mediaPipeDebugResult = null; // MediaPipeのデバッグ結果もリセット
     });
     _stationTimer?.cancel();
+    _eyesClosedScoreTimer?.cancel(); // 目を閉じている間のスコア加算タイマーを停止
     _stopWebFaceDetectionLoop(); // Web検出ループを停止
     _stopCamera(); 
   }
@@ -840,6 +851,12 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         await _initializeCamera(); // カメラを先に準備
         print('DEBUG_MODE: Camera initialized for debug mode.');
 
+        // ビデオ要素の表示を更新
+        var video = html.document.getElementById('webcam-video') as html.VideoElement?;
+        if (video != null) {
+          video.style.display = 'block';
+        }
+
         if (!_isMediaPipeInitialized && !_isMediaPipeInitializing) {
           print('DEBUG_MODE: MediaPipe not initialized. Calling _initializeMediaPipe.');
           await _initializeMediaPipe();
@@ -941,6 +958,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stationTimer?.cancel();
+    _eyesClosedScoreTimer?.cancel(); // 目を閉じている間のスコア加算タイマーを停止
     _stopCamera();
     _faceDetector.close();
     _animationController.dispose();
@@ -1136,7 +1154,78 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
               Positioned.fill(
                 child: Stack(
                   children: [
-                    HtmlElementView(viewType: 'webcam-video'),
+                    // カメラビューは透明なHtmlElementViewで配置
+                    Positioned.fill(
+                      child: Container(
+                        color: Colors.transparent, // 背景を透明に
+                        child: HtmlElementView(viewType: 'webcam-video'),
+                      ),
+                    ),
+                    
+                    // 顔のランドマークを表示するオーバーレイ
+                    if (_mediaPipeDebugResult != null)
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: MediaPipeFacePainter(
+                          _mediaPipeDebugResult,
+                          MediaQuery.of(context).size,
+                        ),
+                      ),
+                    ),
+                    
+                    // デバッグ情報オーバーレイ
+                    Positioned(
+                      left: 20,
+                      top: 120,
+                      right: 20,
+                      child: Container(
+                        padding: const EdgeInsets.all(15),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.7),
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'MediaPipe状態: ${_isMediaPipeInitialized ? "初期化済み" : "未初期化"}',
+                              style: const TextStyle(color: Colors.white, fontSize: 16),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'デバッグ情報: $_debugStatus',
+                              style: const TextStyle(color: Colors.white, fontSize: 16),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '目の状態: ${_isEyesOpen ? "開いています" : "閉じています"}',
+                              style: TextStyle(
+                                color: _isEyesOpen ? Colors.green : Colors.red,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.remove_red_eye,
+                                  color: _isEyesOpen ? Colors.green : Colors.red,
+                                  size: 24,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '左目: ${_getEyeStateText(true)} / 右目: ${_getEyeStateText(false)}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    
+                    // デバッグモード終了ボタン
                     Positioned(
                       top: 40,
                       right: 40,
@@ -1144,8 +1233,29 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                         onPressed: _toggleDebugMode,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
                         ),
-                        child: const Text('デバッグモード終了'),
+                        child: const Text('デバッグモード終了', style: TextStyle(fontSize: 16)),
+                      ),
+                    ),
+                    
+                    // タイトルに戻るボタン
+                    Positioned(
+                      top: 40,
+                      left: 40,
+                      child: ElevatedButton(
+                        onPressed: _resetToTitle,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                        child: const Text('タイトルに戻る', style: TextStyle(fontSize: 16)),
                       ),
                     ),
                   ],
@@ -1359,6 +1469,29 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                         ),
                       ),
                     ),
+                    
+                    // デバッグモード切り替えボタン (右上に丸く浮かせる)
+                    Positioned(
+                      top: 32,
+                      right: 17,
+                      child: Material(
+                        color: _isDebugMode 
+                            ? Colors.red.withOpacity(0.85) 
+                            : Colors.grey.withOpacity(0.85),
+                        shape: const CircleBorder(),
+                        elevation: 6,
+                        child: IconButton(
+                          icon: Icon(
+                            Icons.bug_report, 
+                            color: _isDebugMode ? Colors.white : Colors.grey[700], 
+                            size: 28
+                          ),
+                          onPressed: _toggleDebugMode,
+                          tooltip: _isDebugMode ? 'デバッグモード終了' : 'デバッグモード開始',
+                        ),
+                      ),
+                    ),
+                    
                     // 降りる!ボタン（下中央に大きく）
                     Positioned(
                       bottom: MediaQuery.of(context).padding.bottom + 32,
@@ -1488,7 +1621,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         final rightEyeDistance = (rightEyeUpperY - rightEyeLowerY).abs();
         
         // しきい値以下なら目を閉じていると判定
-        const eyeClosedThreshold = 0.005; // しきい値を下げる（目を閉じている判定を緩める）
+        const eyeClosedThreshold = 0.004; // しきい値をさらに下げる（目を閉じている判定をより緩める）
         leftEyeOpen = leftEyeDistance > eyeClosedThreshold;
         rightEyeOpen = rightEyeDistance > eyeClosedThreshold;
         
@@ -1497,11 +1630,17 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         
         if (mounted) {
           setState(() {
+            // 目の状態が変わった場合のみログを出力
+            if (_isEyesOpen != newEyesOpenState) {
+              print('目の状態が変更: ${_isEyesOpen ? "開" : "閉"} → ${newEyesOpenState ? "開" : "閉"}');
+            }
+            
             _isEyesOpen = newEyesOpenState;
             
             // 目を閉じた場合は駅通過フラグを立てる
             if (!newEyesOpenState) {
               _wasEyesClosedDuringStation = true;
+              print('目を閉じています: スコア継続加算対象');
             }
             
             // まばたき検出は一時的に保持
@@ -1530,6 +1669,75 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       if (mounted) setState(() => _debugStatus = 'MP結果処理エラー: \\${e}');
     } finally {
       _isProcessing = false;
+    }
+  }
+
+  // 目を閉じている間定期的にスコアを加算するタイマー
+  void _startEyesClosedScoreTimer() {
+    _eyesClosedScoreTimer?.cancel();
+    print('新しい目を閉じているスコア加算タイマーを作成 (${EYES_CLOSED_SCORE_INTERVAL}ms間隔)');
+    
+    _eyesClosedScoreTimer = Timer.periodic(Duration(milliseconds: EYES_CLOSED_SCORE_INTERVAL), (timer) {
+      if (!_isGameStarted || _isGameOver) {
+        print('ゲーム状態が無効なため、スコア加算タイマーを停止します。');
+        timer.cancel();
+        return;
+      }
+      
+      // 目を閉じている間はスコアを継続的に加算
+      if (!_isEyesOpen) {
+        setState(() {
+          _score += EYES_CLOSED_SCORE_INCREMENT;
+          print('目を閉じている間のスコア加算: +$EYES_CLOSED_SCORE_INCREMENT, 現在のスコア: $_score, 目の状態: ${_isEyesOpen ? "開" : "閉"}');
+        });
+      } else {
+        print('目が開いているため、スコア加算なし（_isEyesOpen: $_isEyesOpen）');
+      }
+    });
+    
+    print('目を閉じているスコア加算タイマー作成完了');
+  }
+
+  String _getEyeStateText(bool isLeft) {
+    if (_mediaPipeDebugResult == null) return '検出中...';
+    
+    try {
+      final faceLandmarks = js_util.getProperty(_mediaPipeDebugResult, 'faceLandmarks');
+      if (faceLandmarks == null || js_util.getProperty(faceLandmarks, 'length') == 0) {
+        return '検出中...';
+      }
+      
+      final firstFaceLandmarks = js_util.getProperty(faceLandmarks, 0);
+      final landmarks = js_util.dartify(firstFaceLandmarks) as List<dynamic>;
+      
+      // 左目と右目のランドマークインデックス
+      const int leftEyeUpperIndex = 159;
+      const int leftEyeLowerIndex = 145;
+      const int rightEyeUpperIndex = 386;
+      const int rightEyeLowerIndex = 374;
+      
+      if (landmarks.length <= math.max(leftEyeUpperIndex, rightEyeUpperIndex)) {
+        return '不明';
+      }
+      
+      // 左目か右目かに応じて対応するランドマークを取得
+      final upperIndex = isLeft ? leftEyeUpperIndex : rightEyeUpperIndex;
+      final lowerIndex = isLeft ? leftEyeLowerIndex : rightEyeLowerIndex;
+      
+      final eyeUpper = landmarks[upperIndex] as Map;
+      final eyeLower = landmarks[lowerIndex] as Map;
+      
+      final eyeUpperY = eyeUpper['y'] is num ? (eyeUpper['y'] as num).toDouble() : 0.0;
+      final eyeLowerY = eyeLower['y'] is num ? (eyeLower['y'] as num).toDouble() : 0.0;
+      final eyeDistance = (eyeUpperY - eyeLowerY).abs();
+      
+      // しきい値
+      const eyeClosedThreshold = 0.004;
+      final isOpen = eyeDistance > eyeClosedThreshold;
+      
+      return '${isOpen ? "開" : "閉"} (${eyeDistance.toStringAsFixed(4)})';
+    } catch (e) {
+      return 'エラー: $e';
     }
   }
 }
