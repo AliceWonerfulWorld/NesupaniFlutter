@@ -54,13 +54,11 @@ class TrainInteriorPainter extends CustomPainter {
 
     // 窓ガラス
     final glassPaint = Paint()..color = Colors.white.withOpacity(0.85);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        windowRect.deflate(4),
-        const Radius.circular(14),
-      ),
-      glassPaint,
+    final windowGlassRRect = RRect.fromRectAndRadius(
+      windowRect.deflate(4),
+      const Radius.circular(14),
     );
+    canvas.drawRRect(windowGlassRRect, glassPaint);
 
     // 窓のハイライト
     final highlightPaint = Paint()..color = Colors.white.withOpacity(0.25);
@@ -71,6 +69,12 @@ class TrainInteriorPainter extends CustomPainter {
       ),
       highlightPaint,
     );
+    
+    // 目を閉じているときの暗いオーバーレイ
+    if (!isEyesOpen) {
+      final darkOverlayPaint = Paint()..color = Colors.black.withOpacity(0.7);
+      canvas.drawRRect(windowGlassRRect, darkOverlayPaint);
+    }
   }
 
   static Rect getWindowRect(Size size) {

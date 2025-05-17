@@ -1,37 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart' as mlkit_fd; // Alias to avoid conflict
 import 'package:nesupani/screens/eye_detection/painters/train_interior_painter.dart';
 import 'package:nesupani/screens/eye_detection/painters/face_landmark_painter.dart';
+import 'package:nesupani/screens/eye_detection/painters/mediapipe_face_painter.dart'; // MediaPipeFacePainterの追加
 import 'package:nesupani/screens/eye_detection/widgets/animated_scenery_widget.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:js/js.dart';
+import 'package:js/js.dart' as packageJs; // Renamed alias to avoid conflict
+import 'dart:js' as dartJs; // Added for allowInterop
 import 'package:universal_html/html.dart' as html;
 import 'dart:ui' as ui;
+import 'dart:js_util' as js_util;
+import 'dart:ui_web' if (dart.library.io) 'dart:ui' as ui_web;
+import 'dart:math' as math; // math関数を使用するためのインポート
 
-@JS()
-@anonymous
-class FaceDetectionOptions {
-  external factory FaceDetectionOptions();
-  external dynamic get tinyFaceDetector;
-}
-
-@JS()
-@anonymous
-class FaceDetection {
-  external factory FaceDetection();
-  external dynamic get landmarks;
-}
-
-@JS('faceapi')
-external dynamic get faceapi;
-
-@JS('faceapi.nets')
-external dynamic get nets;
-
-@JS('faceapi.detectSingleFace')
-external Future<FaceDetection?> detectSingleFace(dynamic input, dynamic options);
+// MediaPipe Task objects will be handled by js_util typically,
+// but if direct JS interop with @JS is needed for some structures, keep js.dart.
 
 class EyeDetectionScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -47,10 +32,17 @@ class EyeDetectionScreen extends StatefulWidget {
 
 class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   CameraController? _controller;
-  late FaceDetector _faceDetector;
+  late mlkit_fd.FaceDetector _faceDetector; // For mobile
+  
+  // For MediaPipe Web
+  dynamic _mediaPipeFaceDetector; // Stores the MediaPipe FaceDetector task instance
+  bool _isMediaPipeInitialized = false;
+  bool _isMediaPipeInitializing = false; // 初期化処理中フラグを追加
+
   bool _isGameStarted = false;
   int _score = 0;
   Timer? _stationTimer;
+  Timer? _eyesClosedScoreTimer; // 目を閉じている間のスコア加算タイマー
   String _currentStation = '';
   bool _isDebugMode = false;
   String _debugStatus = '';
@@ -58,6 +50,15 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   bool _isEyesOpen = true;
   late AnimationController _animationController;
   late Animation<double> _sceneryAnimation;
+  
+  // スコア計算に関する変数
+  bool _wasEyesClosedDuringStation = false; // 現在の駅で目を閉じていたか
+  int _consecutiveStationsWithEyesClosed = 0; // 連続で目を閉じていた駅の数
+  static const int STATION_BASE_SCORE = 10; // 基本点（駅ごと）
+  static const double CONSECUTIVE_BONUS_MULTIPLIER = 0.5; // 連続ボーナス係数
+  static const int EYES_CLOSED_SCORE_INTERVAL = 200; // 目を閉じている間のスコア加算間隔（ミリ秒）- 短くして反応を早く
+  static const int EYES_CLOSED_SCORE_INCREMENT = 1; // 目を閉じている間の加算量
+  
   final List<String> _stations = [
     '基山駅',
     'けやき台',
@@ -81,53 +82,49 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     '新宮中央'
   ];
   int _currentStationIndex = 0;
-  Face? _debugFace;
+  mlkit_fd.Face? _debugFace; // For mobile
+  dynamic _mediaPipeDebugResult; // For web
   bool _wasEyesOpen = true;
   bool _isGameOver = false;
   int _consecutiveBlinkCount = 0;
   static const int STATION_CHANGE_SECONDS = 3;
-  static const double EYE_CLOSED_THRESHOLD = 0.3; // しきい値を調整
+  static const double EYE_CLOSED_THRESHOLD = 0.3; // This might need adjustment for MediaPipe
   static const int SCORE_PER_BLINK = 10;
   static const int MAX_CONSECUTIVE_BLINKS = 5;
   Timer? _webDetectTimer;
+  // bool _areFaceAPILoaded = false; // Remove this, use _isMediaPipeInitialized
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     if (kIsWeb) {
-      // viewType 'webcam-video' を登録（initStateで一度だけ）
-      // ignore: undefined_prefixed_name
-      ui.platformViewRegistry.registerViewFactory(
+      _initializeMediaPipe();
+      // Use ui_web.platformViewRegistry for web
+      ui_web.platformViewRegistry.registerViewFactory(
         'webcam-video',
         (int viewId) {
-          final video = html.document.getElementById('webcam-video') as html.VideoElement?;
-          if (video != null) {
-            video.style.display = 'block';
-            return video;
-          } else {
-            final newVideo = html.VideoElement()
+          var video = html.document.getElementById('webcam-video') as html.VideoElement?;
+          if (video == null) {
+            video = html.VideoElement()
+              ..id = 'webcam-video'
               ..autoplay = true
-              ..width = 640
-              ..height = 480
-              ..id = 'webcam-video';
-            html.window.navigator.mediaDevices?.getUserMedia({'video': true}).then((stream) {
-              newVideo.srcObject = stream;
-            });
-            html.document.body?.append(newVideo);
-            return newVideo;
+              ..style.display = 'none'; 
+            html.document.body?.append(video);
           }
+          return video;
         },
       );
     }
-    _initializeCamera();
-    _initializeFaceAPI();
-    _faceDetector = FaceDetector(
-      options: FaceDetectorOptions(
-        performanceMode: FaceDetectorMode.accurate, // 高精度モード
+    _initializeCamera(); 
+
+    // Mobile face detector initialization
+    _faceDetector = mlkit_fd.FaceDetector(
+      options: mlkit_fd.FaceDetectorOptions(
+        performanceMode: mlkit_fd.FaceDetectorMode.accurate,
         enableClassification: true,
         enableTracking: true,
-        minFaceSize: 0.1, // 小さい顔も検出可能に
+        minFaceSize: 0.1,
         enableLandmarks: true,
       ),
     );
@@ -140,10 +137,115 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       end: 1.0,
     ).animate(_animationController)
       ..addListener(() {
-        setState(() {
-          _sceneryAnimation.value;
-        });
+        if (mounted) {
+          setState(() {
+            // This will trigger a repaint when animation value changes
+          });
+        }
       });
+  }
+
+  Future<void> _initializeMediaPipe() async {
+    if (!kIsWeb) return;
+    if (_isMediaPipeInitialized || _isMediaPipeInitializing) { // 既に初期化済みか初期化中なら何もしない
+      print('MediaPipe already initialized or is initializing. Skipping.');
+      return;
+    }
+    _isMediaPipeInitializing = true; // 初期化処理開始
+    print('Starting MediaPipe initialization process...');
+
+    try {
+      print('Initializing MediaPipe Face Detector...');
+
+      // MyMediaPipeGlobal が利用可能になるまで少し待つ (最大5秒程度)
+      dynamic myMediaPipeGlobalJs;
+      for (int i = 0; i < 100; i++) { // 100ms * 100 = 10秒
+        myMediaPipeGlobalJs = js_util.getProperty(html.window, 'MyMediaPipeGlobal');
+        if (myMediaPipeGlobalJs != null && js_util.hasProperty(myMediaPipeGlobalJs, 'FilesetResolver')) {
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+
+      if (myMediaPipeGlobalJs == null) {
+        print("エラー: MyMediaPipeGlobal が window オブジェクトに見つかりません (タイムアウト後)。");
+        _debugStatus = 'MediaPipeグローバルオブジェクト未検出(T)';
+        if (mounted) setState(() {});
+        return;
+      }
+
+      final filesetResolverClass = js_util.getProperty(myMediaPipeGlobalJs, 'FilesetResolver');
+      if (filesetResolverClass == null) {
+        print("エラー: FilesetResolver が MyMediaPipeGlobal に見つかりません。");
+        _debugStatus = 'MediaPipe FilesetResolver未検出';
+        if (mounted) setState(() {});
+        return;
+      }
+
+      // FaceDetectorの代わりにFaceLandmarkerを使用
+      final faceLandmarkerClass = js_util.getProperty(myMediaPipeGlobalJs, 'FaceLandmarker');
+      if (faceLandmarkerClass == null) {
+        print("エラー: FaceLandmarker が MyMediaPipeGlobal に見つかりません。");
+        _debugStatus = 'MediaPipe FaceLandmarker API未検出';
+        if (mounted) setState(() {});
+        return;
+      }
+
+      print('MediaPipe Global objects (FilesetResolver, FaceLandmarker) found.');
+
+      // Step 1: Create a FilesetResolver for Vision Tasks
+      final filesetResolver = await js_util.promiseToFuture(
+        js_util.callMethod(filesetResolverClass, 'forVisionTasks', [
+          // WASMファイルのパス
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm' // バージョンを0.10.9に固定
+        ])
+      );
+
+      if (filesetResolver == null) {
+        print('MediaPipe FilesetResolver の作成に失敗しました。');
+        _debugStatus = 'MediaPipe FilesetResolver作成失敗';
+        if (mounted) setState(() {});
+        return;
+      }
+      print('MediaPipe FilesetResolver created successfully.');
+
+      // Step 2: Create FaceLandmarker with options
+      final faceDetectorOptions = js_util.newObject();
+      final baseOptions = js_util.newObject();
+      js_util.setProperty(baseOptions, 'modelAssetPath', 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task');
+      js_util.setProperty(baseOptions, 'delegate', 'GPU'); // または 'CPU'
+      js_util.setProperty(faceDetectorOptions, 'baseOptions', baseOptions);
+      js_util.setProperty(faceDetectorOptions, 'outputFaceBlendshapes', true); // 表情認識のための出力を有効化
+      js_util.setProperty(faceDetectorOptions, 'numFaces', 1); // 検出する顔の数（1人分で十分）
+      js_util.setProperty(faceDetectorOptions, 'runningMode', 'VIDEO'); // VIDEOモード
+
+      // FaceLandmarkerを作成
+      _mediaPipeFaceDetector = await js_util.promiseToFuture(
+        js_util.callMethod(faceLandmarkerClass, 'createFromOptions', [filesetResolver, faceDetectorOptions])
+      );
+
+      if (_mediaPipeFaceDetector != null) {
+        print('MediaPipe Face Landmarker instance created successfully.');
+        _isMediaPipeInitialized = true;
+        _debugStatus = 'MediaPipe 初期化完了';
+
+        // FaceDetectorインスタンス作成後、少し待機してみる (例: 1秒)
+        print('Waiting a bit after FaceLandmarker creation (1 second)...');
+        await Future.delayed(const Duration(seconds: 1));
+        print('Finished waiting after FaceLandmarker creation.');
+      } else {
+        print('MediaPipe Face Landmarker の初期化に失敗しました (detector is null)。');
+        _debugStatus = 'MediaPipe 初期化失敗 (detector null)';
+      }
+    } catch (e, s) {
+      print('MediaPipe 初期化エラー: $e\n$s');
+      _debugStatus = 'MediaPipe 初期化エラー: $e';
+    } finally {
+      _isMediaPipeInitializing = false; // 初期化処理完了
+      if (mounted) {
+        setState(() {});
+      }
+    }
   }
 
   @override
@@ -176,19 +278,58 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
 
   Future<void> _initializeCamera() async {
     if (kIsWeb) {
-      // Web用: video要素を作成してbodyに追加
-      final video = html.VideoElement()
-        ..autoplay = true
-        ..width = 640
-        ..height = 480
-        ..style.display = 'none'; // デバッグ時のみ表示したい場合はblockに
-      html.window.navigator.mediaDevices?.getUserMedia({'video': true}).then((stream) {
-        video.srcObject = stream;
-      });
-      video.id = 'webcam-video';
-      // すでにvideo要素があれば追加しない
-      if (html.document.getElementById('webcam-video') == null) {
+      var video = html.document.getElementById('webcam-video') as html.VideoElement?;
+      if (video == null) {
+        video = html.VideoElement()
+          ..autoplay = true
+          ..width = 640 // 明示的なサイズ設定が役立つことがある
+          ..height = 480
+          ..style.display = _isDebugMode ? 'block' : 'none'; // デバッグモードでは表示
+        video.id = 'webcam-video';
         html.document.body?.append(video);
+      } else {
+        // すでに存在する場合はスタイルを更新
+        video.style.display = _isDebugMode ? 'block' : 'none';
+      }
+
+      try {
+        final stream = await html.window.navigator.mediaDevices?.getUserMedia({'video': true});
+        if (stream != null) {
+          video.srcObject = stream;
+          await video.onLoadedMetadata.first; // メタデータがロードされるまで待つ
+          print('Webcam stream acquired and metadata loaded for video element.');
+
+          // videoWidth と videoHeight が利用可能になるまで待機 (最大5秒程度)
+          int attempts = 0;
+          while ((video.videoWidth == null || video.videoWidth == 0 || video.videoHeight == null || video.videoHeight == 0) && attempts < 50) {
+            await Future.delayed(const Duration(milliseconds: 100));
+            attempts++;
+          }
+          print('Video dimensions available after $attempts attempts: width=${video.videoWidth}, height=${video.videoHeight}');
+
+          if (video.videoWidth == null || video.videoWidth == 0 || video.videoHeight == null || video.videoHeight == 0) {
+            print('Failed to get video dimensions after waiting.');
+            _debugStatus = 'Webcam dimensions not available.';
+            if (mounted) setState(() {});
+            // ここで早期リターンするか、エラー処理を継続するか検討
+          } else {
+            // MediaPipeが初期化済みで、ゲームが開始されている or デバッグモードならループ開始
+            if ((_isGameStarted || _isDebugMode) && _isMediaPipeInitialized && _mediaPipeFaceDetector != null) {
+                 print('Camera initialized and conditions met, starting web face detection loop from _initializeCamera.');
+                _startWebFaceDetectionLoop();
+            } else {
+                 print('Camera initialized but conditions not met to start loop from _initializeCamera (isGameStarted: $_isGameStarted, isDebugMode: $_isDebugMode, isMediaPipeInitialized: $_isMediaPipeInitialized)');
+            }
+          }
+        } else {
+          print('Failed to get webcam stream.');
+          _debugStatus = 'Webcam stream acquisition failed.';
+          if (mounted) setState(() {});
+        }
+      } catch (e) {
+        print('Error initializing webcam for web: $e');
+        _debugStatus = 'Webcam initialization error: $e';
+        if (mounted) setState(() {});
       }
       return;
     }
@@ -227,21 +368,6 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     }
   }
 
-  Future<void> _initializeFaceAPI() async {
-    if (kIsWeb) {
-      try {
-        // Face-API.jsのモデルをロード
-        await nets.tinyFaceDetector.loadFromUri('models');
-        await nets.faceLandmark68Net.loadFromUri('models');
-        await nets.faceRecognitionNet.loadFromUri('models');
-        await nets.faceExpressionNet.loadFromUri('models');
-        print('Face-API.js models loaded successfully');
-      } catch (e) {
-        print('Error loading Face-API.js models: $e');
-      }
-    }
-  }
-
   Future<void> _processImage(CameraImage image) async {
     if (!_isGameStarted && !_isDebugMode) return;
     if (_isProcessing || _isGameOver) return;
@@ -249,69 +375,55 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     _isProcessing = true;
     try {
       if (kIsWeb) {
-        // Web用の顔認識処理
-        final canvas = html.CanvasElement()
-          ..width = image.width
-          ..height = image.height;
-        final ctx = canvas.context2D;
+        // Web用の顔認識処理 - MediaPipeに置き換えるため、古いface-api.jsコードは削除
+        if (!_isMediaPipeInitialized || _mediaPipeFaceDetector == null) {
+          _debugStatus = 'MediaPipe未初期化';
+          if(mounted) setState(() {});
+          _isProcessing = false;
+          return;
+        }
         
-        // 画像データをCanvasに描画
-        final imageData = ctx.createImageData(image.width, image.height);
-        imageData.data.setAll(0, image.planes[0].bytes);
-        ctx.putImageData(imageData, 0, 0);
-
-        // Face-API.jsで顔を検出
-        final detection = await detectSingleFace(
-          canvas,
-          nets.tinyFaceDetector.options,
-        );
-
-        if (detection == null) {
-          setState(() {
-            _debugStatus = '顔が検出されていません';
-            _debugFace = null;
-          });
+        final videoElement = html.document.getElementById('webcam-video') as html.VideoElement?;
+        if (videoElement == null || videoElement.readyState != 4 || videoElement.videoWidth == 0 || videoElement.videoHeight == 0) {
+           if(mounted) {
+            setState(() {
+              _debugStatus = 'Webcam video not ready for MediaPipe.';
+            });
+           }
+          _isProcessing = false;
           return;
         }
 
-        // 目の状態を取得
-        final landmarks = detection.landmarks;
-        final leftEye = _getEyePoints(landmarks, true);
-        final rightEye = _getEyePoints(landmarks, false);
-        
-        // 目の開閉状態を判定
-        final leftEyeOpen = _isEyeOpen(leftEye);
-        final rightEyeOpen = _isEyeOpen(rightEye);
+        // TODO: Implement MediaPipe detection call here
+        // final num frameTime = html.window.performance.now(); // Example timestamp
+        // js_util.callMethod(_mediaPipeFaceDetector, 'detectForVideo', [videoElement, frameTime]);
+        // Detection results will be handled by a listener or callback if configured, 
+        // or directly if detectForVideo returns results synchronously (less common for video).
+        // For now, just a placeholder:
+        _debugStatus = 'MediaPipe detecting...';
+        if (mounted) setState(() {});
 
-        setState(() {
-          _debugStatus = '左目: ${leftEyeOpen ? "開" : "閉"}\n右目: ${rightEyeOpen ? "開" : "閉"}';
-          _isEyesOpen = leftEyeOpen || rightEyeOpen;
-        });
+        // Mock processing to allow game logic to proceed for testing UI
+        // This section needs to be replaced with actual MediaPipe result processing.
+        // setState(() {
+        //   _isEyesOpen = true; // Assume open for now
+        //   _consecutiveBlinkCount = 0;
+        //   _mediaPipeDebugResult = null; // Store actual result here
+        // });
 
-        if (_isGameStarted && _wasEyesOpen && !leftEyeOpen && !rightEyeOpen) {
-          _addScore();
-        }
-        _wasEyesOpen = leftEyeOpen || rightEyeOpen;
-
-        if (_isEyesOpen) {
-          setState(() {
-            _consecutiveBlinkCount = 0;
-          });
-        }
       } else {
-        // 既存のモバイル用顔認識処理
+        // 既存のモバイル用顔認識処理 (google_mlkit_face_detection)
         final Size imageSize = Size(image.width.toDouble(), image.height.toDouble());
         final rotation = _controller!.description.sensorOrientation;
 
-        // デバッグログを追加
         print('Processing image with width: ${image.width}, height: ${image.height}');
 
-        final inputImage = InputImage.fromBytes(
+        final inputImage = mlkit_fd.InputImage.fromBytes(
           bytes: image.planes[0].bytes,
-          metadata: InputImageMetadata(
+          metadata: mlkit_fd.InputImageMetadata(
             size: imageSize,
-            rotation: InputImageRotation.values[rotation ~/ 90],
-            format: InputImageFormat.yuv420,
+            rotation: mlkit_fd.InputImageRotation.values[rotation ~/ 90],
+            format: mlkit_fd.InputImageFormat.nv21, // Ensure this matches your CameraImage format
             bytesPerRow: image.planes[0].bytesPerRow,
           ),
         );
@@ -346,28 +458,22 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         final leftEyeClosed = leftProb < EYE_CLOSED_THRESHOLD;
         final rightEyeClosed = rightProb < EYE_CLOSED_THRESHOLD;
 
-        // デバッグログを追加
-        print('Left Eye Probability: $leftProb, Closed: $leftEyeClosed');
-        print('Right Eye Probability: $rightProb, Closed: $rightEyeClosed');
-
         final leftEyeOpen = !leftEyeClosed;
         final rightEyeOpen = !rightEyeClosed;
 
         setState(() {
           _debugStatus = '左目: ${leftEyeOpen ? "開" : "閉"}\n右目: ${rightEyeOpen ? "開" : "閉"}';
-          _isEyesOpen = leftEyeOpen || rightEyeOpen; // 両目が閉じた場合のみ閉じたと判定
+          _isEyesOpen = leftEyeOpen || rightEyeOpen;
           _debugFace = face;
         });
         print('processImage: _isGameStarted=$_isGameStarted, _isDebugMode=$_isDebugMode, left: $leftEyeOpen, right: $rightEyeOpen');
 
-        // 「開→完全に両目が閉じた瞬間」だけ加算
         if (_isGameStarted && _wasEyesOpen && leftEyeClosed && rightEyeClosed) {
           _addScore();
           print('スコア加算!');
         }
         _wasEyesOpen = leftEyeOpen || rightEyeOpen;
 
-        // 目が開いたら連続カウントをリセット
         if (_isEyesOpen) {
           setState(() {
             _consecutiveBlinkCount = 0;
@@ -384,17 +490,39 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     }
   }
 
-  List<Map<String, double>> _getEyePoints(dynamic landmarks, bool isLeftEye) {
+  List<Map<String, double>> _getEyePointsWeb(dynamic landmarks, bool isLeftEye) {
+    // face-api.jsのlandmarks.getPositions()は68点の配列
     final points = <Map<String, double>>[];
-    final start = isLeftEye ? 36 : 42;
-    final end = isLeftEye ? 41 : 47;
+    final start = isLeftEye ? 36 : 42; // 左目のランドマークインデックス (0-indexed)
+    final end = isLeftEye ? 41 : 47;   // 右目のランドマークインデックス (0-indexed)
     
+    // landmarksオブジェクトから座標リストを取得 (getRelativePositionsまたはgetPositions)
+    // face-api.jsのバージョンやランドマークモデルによってプロパティ名が異なる場合がある
+    var positions = js_util.getProperty(landmarks, 'positions');
+    if (positions == null) {
+      // getPositionsメソッドを試す (古いバージョンの場合)
+      if (js_util.hasProperty(landmarks, 'getPositions')) {
+        positions = js_util.callMethod(landmarks, 'getPositions', []);
+      }
+    }
+
+    if (positions == null) return points;
+
+    final length = js_util.getProperty(positions, 'length') as int?;
+    if (length == null || length < end + 1) return points; // 必要な点があるか確認
+
     for (var i = start; i <= end; i++) {
-      final point = landmarks.getPoint(i);
-      points.add({
-        'x': point.x.toDouble(),
-        'y': point.y.toDouble(),
-      });
+      final point = js_util.getProperty(positions, i);
+      if (point != null) {
+        final x = js_util.getProperty(point, 'x');
+        final y = js_util.getProperty(point, 'y');
+        if (x is num && y is num) {
+          points.add({
+            'x': x.toDouble(),
+            'y': y.toDouble(),
+          });
+        }
+      }
     }
     return points;
   }
@@ -421,24 +549,71 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       _currentStationIndex = 0;
       _consecutiveBlinkCount = 0;
       _wasEyesOpen = true;
+      _debugStatus = 'ゲーム状態準備完了'; // 初期ステータス
     });
     print('ゲーム状態: _isGameStarted=$_isGameStarted, _isGameOver=$_isGameOver');
 
     await _initializeCamera();
-    print('カメラ初期化完了');
+    print('カメラ初期化完了 (_startGame)');
+
+    if (kIsWeb) {
+      if (!_isMediaPipeInitialized && !_isMediaPipeInitializing) {
+        print('START_GAME: MediaPipe未初期化。_initializeMediaPipeを呼び出します。');
+        await _initializeMediaPipe(); // MediaPipeを初期化
+      }
+      // MediaPipeが初期化されたか、既にされていた場合
+      if (_isMediaPipeInitialized && _mediaPipeFaceDetector != null) {
+        print('START_GAME: MediaPipe初期化済。Web顔検出ループを開始します。');
+        if (mounted) setState(() => _debugStatus = 'MP検出ループ開始試行(SG)');
+        _startWebFaceDetectionLoop();
+      } else {
+        print('START_GAME: MediaPipeの準備ができていません。検出ループは開始されません。');
+        if (mounted) setState(() => _debugStatus = 'MP準備未完了(SG)');
+      }
+    } else {
+      // モバイルの場合はここでカメラのストリーム処理が開始されているはず
+    }
 
     _startStationTimer();
-    print('駅タイマー開始');
+    print('目を閉じているスコア加算タイマー開始');
+    _startEyesClosedScoreTimer(); // 目を閉じている間のスコア加算タイマーを開始
+    print('駅タイマー開始 (startGame)');
   }
 
   void _startStationTimer() {
     _stationTimer?.cancel();
+    _wasEyesClosedDuringStation = false; // 駅が変わるたびにリセット
+    
     _stationTimer = Timer.periodic(Duration(seconds: STATION_CHANGE_SECONDS), (timer) {
       if (!_isGameStarted || _isGameOver) {
         timer.cancel();
         return;
       }
+      
+      // 駅変更前にスコア計算
+      if (!_isEyesOpen || _wasEyesClosedDuringStation) {
+        // 駅通過中に目を閉じていた場合
+        _wasEyesClosedDuringStation = true;
+        _consecutiveStationsWithEyesClosed++;
+        
+        // 基本点 + 連続ボーナス
+        int stationBonus = (_consecutiveStationsWithEyesClosed * CONSECUTIVE_BONUS_MULTIPLIER * STATION_BASE_SCORE).round();
+        int totalStationScore = STATION_BASE_SCORE + stationBonus;
+        
+        setState(() {
+          _score += totalStationScore;
+          _debugStatus = 'MP: 駅通過ボーナス! +$totalStationScore (_consecutiveStationsWithEyesClosed駅連続)';
+        });
+        
+        print('駅通過ボーナス: 基本点=$STATION_BASE_SCORE + 連続ボーナス=$stationBonus = $totalStationScore, 連続駅数=$_consecutiveStationsWithEyesClosed');
+      } else {
+        // 目を開けていた場合は連続カウントリセット
+        _consecutiveStationsWithEyesClosed = 0;
+        print('駅通過: 目を開けていたためボーナスなし。連続カウントリセット');
+      }
+      
       setState(() {
+        // 駅を進める
         if (_currentStationIndex < _stations.length - 1) {
           // 福工大前から新宮中央に切り替わる瞬間にゲームオーバー
           if (_currentStation == '福工大前' && _stations[_currentStationIndex + 1] == '新宮中央') {
@@ -449,6 +624,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
           } else {
             _currentStationIndex++;
             _currentStation = _stations[_currentStationIndex];
+            _wasEyesClosedDuringStation = false; // 新しい駅のフラグをリセット
           }
         } else {
           _isGameOver = true;
@@ -464,7 +640,6 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     if (!_isGameStarted || _isGameOver) return;
 
     setState(() {
-      _score += SCORE_PER_BLINK;
       _consecutiveBlinkCount++;
       
       if (_consecutiveBlinkCount >= MAX_CONSECUTIVE_BLINKS) {
@@ -484,12 +659,17 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       _currentStation = '';
       _currentStationIndex = 0;
       _consecutiveBlinkCount = 0;
+      _wasEyesClosedDuringStation = false;
+      _consecutiveStationsWithEyesClosed = 0; // 連続駅カウントもリセット
       _wasEyesOpen = true;
       _isDebugMode = false; 
       _debugStatus = '';
       _debugFace = null;
+      _mediaPipeDebugResult = null; // MediaPipeのデバッグ結果もリセット
     });
     _stationTimer?.cancel();
+    _eyesClosedScoreTimer?.cancel(); // 目を閉じている間のスコア加算タイマーを停止
+    _stopWebFaceDetectionLoop(); // Web検出ループを停止
     _stopCamera(); 
   }
 
@@ -599,23 +779,53 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   }
 
   void _startWebFaceDetectionLoop() {
+    if (!_isMediaPipeInitialized) {
+      print('MediaPipe Face Detector not loaded yet. Skipping web detection loop.');
+      if (mounted) {
+        setState(() {
+          _debugStatus = 'MediaPipe FaceDetectorが未ロードです。';
+        });
+      }
+      return;
+    }
     _webDetectTimer?.cancel();
-    _webDetectTimer = Timer.periodic(Duration(milliseconds: 300), (_) async {
-      final video = html.document.getElementById('webcam-video') as html.VideoElement?;
-      if (video != null && video.readyState == 4) {
-        final canvas = html.CanvasElement(width: video.videoWidth, height: video.videoHeight);
-        final ctx = canvas.context2D;
-        ctx.drawImage(video, 0, 0);
+    _webDetectTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
+      if (!kIsWeb || !_isMediaPipeInitialized || _mediaPipeFaceDetector == null) {
+        _webDetectTimer?.cancel();
+        return;
+      }
+      final videoElement = html.document.getElementById('webcam-video') as html.VideoElement?;
+      if (videoElement != null && videoElement.readyState == 4 && videoElement.videoWidth! > 0 && videoElement.videoHeight! > 0) {
         try {
-          final detection = await detectSingleFace(canvas, nets.tinyFaceDetector.options);
-          setState(() {
-            _debugStatus = detection != null ? '顔検出！' : '顔なし';
-          });
-        } catch (e) {
-          setState(() {
-            _debugStatus = 'エラー: $e';
-          });
+          final num frameTime = html.window.performance.now();
+          print('MP LOOP: Attempting to call detectForVideo with frameTime: $frameTime for video id: ${videoElement.id}');
+          
+          // FaceLandmarkerのdetectForVideoメソッドを正しく呼び出す
+          final result = js_util.callMethod(_mediaPipeFaceDetector, 'detectForVideo', [videoElement, frameTime]);
+          
+          // 結果を直接処理（結果がnullでない場合）
+          if (result != null) {
+            print('MP LOOP: Direct result processing');
+            _processMediaPipeResultsWeb(result);
+          } else {
+            print('MP LOOP: detectForVideo returned null result');
+          }
+          
+          print('MP LOOP: detectForVideo call completed.');
+        } catch (e, s) {
+          print('Web MediaPipe detection error in loop: \\${e}\\n\\${s}');
+          if (mounted) {
+            setState(() {
+              _debugStatus = 'MediaPipe検出エラー: \\${e}';
+            });
+          }
         }
+      } else {
+         if (mounted) {
+            setState(() {
+              _debugStatus = 'Video element not ready for MediaPipe detection.';
+            });
+          }
       }
     });
   }
@@ -626,45 +836,59 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   }
 
   void _toggleDebugMode() async {
-    setState(() {
-      _isDebugMode = !_isDebugMode;
-      if (!_isDebugMode) {
-        _debugStatus = '';
-        _debugFace = null;
-      }
-    });
-    if (_isDebugMode) {
+    print('DEBUG_MODE: _toggleDebugMode called. Current _isDebugMode: $_isDebugMode');
+    final newDebugModeState = !_isDebugMode;
+
+    if (newDebugModeState) { // デバッグモードを有効にする場合
+      print('DEBUG_MODE: Enabling debug mode...');
+      setState(() {
+        _isDebugMode = true;
+        _debugStatus = 'デバッグモード準備中...';
+      });
+
       if (kIsWeb) {
-        // video要素がなければ生成
-        var video = html.document.getElementById('webcam-video') as html.VideoElement?;
-        if (video == null) {
-          video = html.VideoElement()
-            ..autoplay = true
-            ..width = 640
-            ..height = 480
-            ..id = 'webcam-video';
-          await html.window.navigator.mediaDevices?.getUserMedia({'video': true}).then((stream) {
-            video!.srcObject = stream;
-          });
-          html.document.body?.append(video);
-        }
-        setState(() {});
-        _startWebFaceDetectionLoop();
-      } else {
-        await _initializeCamera();
-      }
-    } else {
-      if (kIsWeb) {
-        _stopWebFaceDetectionLoop();
-        // video要素のストリーム停止と削除
+        print('DEBUG_MODE: Platform is Web.');
+        await _initializeCamera(); // カメラを先に準備
+        print('DEBUG_MODE: Camera initialized for debug mode.');
+
+        // ビデオ要素の表示を更新
         var video = html.document.getElementById('webcam-video') as html.VideoElement?;
         if (video != null) {
-          video.pause();
-          video.srcObject = null;
-          video.remove();
+          video.style.display = 'block';
         }
+
+        if (!_isMediaPipeInitialized && !_isMediaPipeInitializing) {
+          print('DEBUG_MODE: MediaPipe not initialized. Calling _initializeMediaPipe.');
+          await _initializeMediaPipe();
+        }
+
+        if (_isMediaPipeInitialized && _mediaPipeFaceDetector != null) {
+          print('DEBUG_MODE: MediaPipe ready, starting web face detection loop.');
+          setState(() => _debugStatus = 'MPデバッグ検出ループ開始試行');
+          _startWebFaceDetectionLoop();
+        } else {
+          print('DEBUG_MODE: MediaPipe NOT ready. Cannot start detection loop.');
+          setState(() => _debugStatus = 'MP準備未完了(デバッグ)');
+        }
+      } else { // Mobile
+        print('DEBUG_MODE: Platform is Mobile, calling _initializeCamera.');
+        await _initializeCamera();
+        setState(() => _debugStatus = 'モバイルデバッグモード有効');
       }
-      await _stopCamera();
+    } else { // デバッグモードを無効にする場合
+      print('DEBUG_MODE: Disabling debug mode...');
+      if (kIsWeb) {
+        print('DEBUG_MODE: Stopping web face detection loop (web).');
+        _stopWebFaceDetectionLoop();
+      }
+      // _stopCamera(); // これは_resetToTitleに任せるか、状態に応じて判断
+      setState(() {
+        _isDebugMode = false;
+        _debugStatus = '';
+        _debugFace = null;
+        _mediaPipeDebugResult = null;
+      });
+      print('DEBUG_MODE: Debug mode disabled.');
     }
   }
 
@@ -734,6 +958,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stationTimer?.cancel();
+    _eyesClosedScoreTimer?.cancel(); // 目を閉じている間のスコア加算タイマーを停止
     _stopCamera();
     _faceDetector.close();
     _animationController.dispose();
@@ -929,7 +1154,78 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
               Positioned.fill(
                 child: Stack(
                   children: [
-                    HtmlElementView(viewType: 'webcam-video'),
+                    // カメラビューは透明なHtmlElementViewで配置
+                    Positioned.fill(
+                      child: Container(
+                        color: Colors.transparent, // 背景を透明に
+                        child: HtmlElementView(viewType: 'webcam-video'),
+                      ),
+                    ),
+                    
+                    // 顔のランドマークを表示するオーバーレイ
+                    if (_mediaPipeDebugResult != null)
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: MediaPipeFacePainter(
+                          _mediaPipeDebugResult,
+                          MediaQuery.of(context).size,
+                        ),
+                      ),
+                    ),
+                    
+                    // デバッグ情報オーバーレイ
+                    Positioned(
+                      left: 20,
+                      top: 120,
+                      right: 20,
+                      child: Container(
+                        padding: const EdgeInsets.all(15),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.7),
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'MediaPipe状態: ${_isMediaPipeInitialized ? "初期化済み" : "未初期化"}',
+                              style: const TextStyle(color: Colors.white, fontSize: 16),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'デバッグ情報: $_debugStatus',
+                              style: const TextStyle(color: Colors.white, fontSize: 16),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '目の状態: ${_isEyesOpen ? "開いています" : "閉じています"}',
+                              style: TextStyle(
+                                color: _isEyesOpen ? Colors.green : Colors.red,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.remove_red_eye,
+                                  color: _isEyesOpen ? Colors.green : Colors.red,
+                                  size: 24,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '左目: ${_getEyeStateText(true)} / 右目: ${_getEyeStateText(false)}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    
+                    // デバッグモード終了ボタン
                     Positioned(
                       top: 40,
                       right: 40,
@@ -937,8 +1233,29 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                         onPressed: _toggleDebugMode,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
                         ),
-                        child: const Text('デバッグモード終了'),
+                        child: const Text('デバッグモード終了', style: TextStyle(fontSize: 16)),
+                      ),
+                    ),
+                    
+                    // タイトルに戻るボタン
+                    Positioned(
+                      top: 40,
+                      left: 40,
+                      child: ElevatedButton(
+                        onPressed: _resetToTitle,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                        child: const Text('タイトルに戻る', style: TextStyle(fontSize: 16)),
                       ),
                     ),
                   ],
@@ -1152,6 +1469,29 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                         ),
                       ),
                     ),
+                    
+                    // デバッグモード切り替えボタン (右上に丸く浮かせる)
+                    Positioned(
+                      top: 32,
+                      right: 17,
+                      child: Material(
+                        color: _isDebugMode 
+                            ? Colors.red.withOpacity(0.85) 
+                            : Colors.grey.withOpacity(0.85),
+                        shape: const CircleBorder(),
+                        elevation: 6,
+                        child: IconButton(
+                          icon: Icon(
+                            Icons.bug_report, 
+                            color: _isDebugMode ? Colors.white : Colors.grey[700], 
+                            size: 28
+                          ),
+                          onPressed: _toggleDebugMode,
+                          tooltip: _isDebugMode ? 'デバッグモード終了' : 'デバッグモード開始',
+                        ),
+                      ),
+                    ),
+                    
                     // 降りる!ボタン（下中央に大きく）
                     Positioned(
                       bottom: MediaQuery.of(context).padding.bottom + 32,
@@ -1193,5 +1533,211 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         ],
       ),
     );
+  }
+
+  // MediaPipeからの検出結果を処理するコールバック関数 (Web用)
+  void _processMediaPipeResultsWeb(dynamic result) {
+    print('MP CALLED: _processMediaPipeResultsWeb with result type: ${result.runtimeType}');
+    print('MP RESULT KEYS: ${js_util.getProperty(result, 'constructor')?.toString() ?? 'undefined constructor'}');
+
+    // jsUtilでオブジェクトのすべてのプロパティを列挙
+    try {
+      final jsKeys = js_util.objectKeys(result);
+      print('MP RESULT KEYS: ${js_util.dartify(jsKeys)}');
+    } catch (e) {
+      print('Failed to get result keys: $e');
+    }
+    
+    if (_isProcessing || (!_isGameStarted && !_isDebugMode) || _isGameOver) {
+      _isProcessing = false;
+      return;
+    }
+    _isProcessing = true;
+
+    try {
+      final faceLandmarks = js_util.getProperty(result, 'faceLandmarks');
+      final faceBlendshapes = js_util.getProperty(result, 'faceBlendshapes');
+
+      print('MP faceLandmarks: ${faceLandmarks != null ? "present" : "null"}');
+      if (faceLandmarks != null) {
+        print('MP faceLandmarks.length: ${js_util.getProperty(faceLandmarks, 'length')}');
+      }
+
+      if (faceLandmarks == null || js_util.getProperty(faceLandmarks, 'length') == 0) {
+        if (mounted) {
+          setState(() {
+            _debugStatus = 'MP: 顔未検出 (\\${DateTime.now().second}s)';
+            _isEyesOpen = true;
+            _consecutiveBlinkCount = 0;
+            _mediaPipeDebugResult = null;
+          });
+        }
+        _isProcessing = false;
+        return;
+      }
+
+      // 最初の顔のランドマークを取得
+      final firstFaceLandmarks = js_util.getProperty(faceLandmarks, 0);
+      print('MP firstFaceLandmarks type: ${firstFaceLandmarks.runtimeType}');
+      
+      // ダーティファイする前にランドマークの長さを確認
+      final landmarksLength = js_util.hasProperty(firstFaceLandmarks, 'length') 
+          ? js_util.getProperty(firstFaceLandmarks, 'length') 
+          : 'unknown';
+      print('MP landmarks length before dartify: $landmarksLength');
+      
+      final landmarks = js_util.dartify(firstFaceLandmarks) as List<dynamic>;
+      print('MP landmarks dartified length: ${landmarks.length}');
+      
+      // 目のランドマークのインデックス（MediaPipe Face Landmarker）
+      // 左目の上下のランドマークは約159（上）と145（下）
+      // 右目の上下のランドマークは約386（上）と374（下）
+      const int leftEyeUpperIndex = 159;
+      const int leftEyeLowerIndex = 145;
+      const int rightEyeUpperIndex = 386;
+      const int rightEyeLowerIndex = 374;
+      
+      bool leftEyeOpen = true;
+      bool rightEyeOpen = true;
+      
+      if (landmarks.length > rightEyeUpperIndex) {
+        // 左目の開閉判定
+        print('左目ランドマーク型: ${landmarks[leftEyeUpperIndex].runtimeType}');
+        
+        // キャストを修正し、より一般的なMap型として扱う
+        final leftEyeUpper = landmarks[leftEyeUpperIndex] as Map;
+        final leftEyeLower = landmarks[leftEyeLowerIndex] as Map;
+        
+        // yプロパティの取得も安全に行う
+        final leftEyeUpperY = leftEyeUpper['y'] is num ? (leftEyeUpper['y'] as num).toDouble() : 0.0;
+        final leftEyeLowerY = leftEyeLower['y'] is num ? (leftEyeLower['y'] as num).toDouble() : 0.0;
+        final leftEyeDistance = (leftEyeUpperY - leftEyeLowerY).abs();
+        
+        // 右目の開閉判定
+        final rightEyeUpper = landmarks[rightEyeUpperIndex] as Map;
+        final rightEyeLower = landmarks[rightEyeLowerIndex] as Map;
+        final rightEyeUpperY = rightEyeUpper['y'] is num ? (rightEyeUpper['y'] as num).toDouble() : 0.0;
+        final rightEyeLowerY = rightEyeLower['y'] is num ? (rightEyeLower['y'] as num).toDouble() : 0.0;
+        final rightEyeDistance = (rightEyeUpperY - rightEyeLowerY).abs();
+        
+        // しきい値以下なら目を閉じていると判定
+        const eyeClosedThreshold = 0.004; // しきい値をさらに下げる（目を閉じている判定をより緩める）
+        leftEyeOpen = leftEyeDistance > eyeClosedThreshold;
+        rightEyeOpen = rightEyeDistance > eyeClosedThreshold;
+        
+        final newEyesOpenState = leftEyeOpen || rightEyeOpen;
+        _debugStatus = 'MP: 顔検出 L: \\${leftEyeDistance.toStringAsFixed(4)} R: \\${rightEyeDistance.toStringAsFixed(4)}';
+        
+        if (mounted) {
+          setState(() {
+            // 目の状態が変わった場合のみログを出力
+            if (_isEyesOpen != newEyesOpenState) {
+              print('目の状態が変更: ${_isEyesOpen ? "開" : "閉"} → ${newEyesOpenState ? "開" : "閉"}');
+            }
+            
+            _isEyesOpen = newEyesOpenState;
+            
+            // 目を閉じた場合は駅通過フラグを立てる
+            if (!newEyesOpenState) {
+              _wasEyesClosedDuringStation = true;
+              print('目を閉じています: スコア継続加算対象');
+            }
+            
+            // まばたき検出は一時的に保持
+            if (_wasEyesOpen && !newEyesOpenState) {
+              _addScore(); // まばたき連続カウント用
+              print('MP: まばたき検出');
+            }
+            _wasEyesOpen = newEyesOpenState;
+            
+            if (newEyesOpenState) {
+              _consecutiveBlinkCount = 0;
+            }
+            _mediaPipeDebugResult = result;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _debugStatus = 'MP: ランドマーク不足 (\\${landmarks.length})';
+            _isEyesOpen = true;
+          });
+        }
+      }
+    } catch (e, s) {
+      print('MediaPipe結果処理エラー: \\${e}\\n\\${s}');
+      if (mounted) setState(() => _debugStatus = 'MP結果処理エラー: \\${e}');
+    } finally {
+      _isProcessing = false;
+    }
+  }
+
+  // 目を閉じている間定期的にスコアを加算するタイマー
+  void _startEyesClosedScoreTimer() {
+    _eyesClosedScoreTimer?.cancel();
+    print('新しい目を閉じているスコア加算タイマーを作成 (${EYES_CLOSED_SCORE_INTERVAL}ms間隔)');
+    
+    _eyesClosedScoreTimer = Timer.periodic(Duration(milliseconds: EYES_CLOSED_SCORE_INTERVAL), (timer) {
+      if (!_isGameStarted || _isGameOver) {
+        print('ゲーム状態が無効なため、スコア加算タイマーを停止します。');
+        timer.cancel();
+        return;
+      }
+      
+      // 目を閉じている間はスコアを継続的に加算
+      if (!_isEyesOpen) {
+        setState(() {
+          _score += EYES_CLOSED_SCORE_INCREMENT;
+          print('目を閉じている間のスコア加算: +$EYES_CLOSED_SCORE_INCREMENT, 現在のスコア: $_score, 目の状態: ${_isEyesOpen ? "開" : "閉"}');
+        });
+      } else {
+        print('目が開いているため、スコア加算なし（_isEyesOpen: $_isEyesOpen）');
+      }
+    });
+    
+    print('目を閉じているスコア加算タイマー作成完了');
+  }
+
+  String _getEyeStateText(bool isLeft) {
+    if (_mediaPipeDebugResult == null) return '検出中...';
+    
+    try {
+      final faceLandmarks = js_util.getProperty(_mediaPipeDebugResult, 'faceLandmarks');
+      if (faceLandmarks == null || js_util.getProperty(faceLandmarks, 'length') == 0) {
+        return '検出中...';
+      }
+      
+      final firstFaceLandmarks = js_util.getProperty(faceLandmarks, 0);
+      final landmarks = js_util.dartify(firstFaceLandmarks) as List<dynamic>;
+      
+      // 左目と右目のランドマークインデックス
+      const int leftEyeUpperIndex = 159;
+      const int leftEyeLowerIndex = 145;
+      const int rightEyeUpperIndex = 386;
+      const int rightEyeLowerIndex = 374;
+      
+      if (landmarks.length <= math.max(leftEyeUpperIndex, rightEyeUpperIndex)) {
+        return '不明';
+      }
+      
+      // 左目か右目かに応じて対応するランドマークを取得
+      final upperIndex = isLeft ? leftEyeUpperIndex : rightEyeUpperIndex;
+      final lowerIndex = isLeft ? leftEyeLowerIndex : rightEyeLowerIndex;
+      
+      final eyeUpper = landmarks[upperIndex] as Map;
+      final eyeLower = landmarks[lowerIndex] as Map;
+      
+      final eyeUpperY = eyeUpper['y'] is num ? (eyeUpper['y'] as num).toDouble() : 0.0;
+      final eyeLowerY = eyeLower['y'] is num ? (eyeLower['y'] as num).toDouble() : 0.0;
+      final eyeDistance = (eyeUpperY - eyeLowerY).abs();
+      
+      // しきい値
+      const eyeClosedThreshold = 0.004;
+      final isOpen = eyeDistance > eyeClosedThreshold;
+      
+      return '${isOpen ? "開" : "閉"} (${eyeDistance.toStringAsFixed(4)})';
+    } catch (e) {
+      return 'エラー: $e';
+    }
   }
 }

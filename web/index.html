@@ -34,15 +34,36 @@
 
   <script>
     // The value below is injected by flutter build, do not touch.
-    const serviceWorkerVersion = null;
+    var serviceWorkerVersion = null;
   </script>
   <!-- This script adds the flutter initialization JS code -->
   <script src="flutter.js" defer></script>
 
-  <!-- TensorFlow.js -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0"></script>
-  <!-- Face-API.js -->
+  <!-- mediapipe tasks-vision -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js" crossorigin="anonymous"></script> -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" crossorigin="anonymous"></script> -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script> -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/vision_bundle.js" crossorigin="anonymous"></script> -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/dist/vision_bundle.js" crossorigin="anonymous"></script> -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/files/vision_bundle.js" crossorigin="anonymous"></script> -->
+  <script type="module" id="mediapipe-tasks-vision-module" src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/vision_bundle.mjs" crossorigin="anonymous"></script>
+  <script type="module">
+    import { FilesetResolver, FaceDetector, FaceLandmarker } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/vision_bundle.mjs';
+    window.MyMediaPipeGlobal = {
+      FilesetResolver,
+      FaceDetector,
+      FaceLandmarker
+    };
+    console.log('MyMediaPipeGlobal set:', window.MyMediaPipeGlobal);
+  </script>
+  <!-- <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js"></script> -->
+
+  <!-- Comment out or remove old TensorFlow.js and Face-API.js script tags -->
+  <!--
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  -->
 </head>
 <body>
   <script>
