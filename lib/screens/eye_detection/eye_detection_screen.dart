@@ -22,6 +22,282 @@ import 'package:google_fonts/google_fonts.dart';  // Google Fontsをインポー
 // MediaPipe Task objects will be handled by js_util typically,
 // but if direct JS interop with @JS is needed for some structures, keep js.dart.
 
+// 星空を描画するCustomPainter
+class StarPainter extends CustomPainter {
+  final int starCount;
+  final Color starColor;
+  final math.Random random = math.Random();
+
+  StarPainter({this.starCount = 150, required this.starColor});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint();
+    for (int i = 0; i < starCount; i++) {
+      final x = random.nextDouble() * size.width;
+      final y = random.nextDouble() * size.height;
+      final radius = random.nextDouble() * 1.2 + 0.3; // 星の半径 (0.3 to 1.5)
+      paint.color = starColor.withOpacity(random.nextDouble() * 0.6 + 0.4); // 透明度 (0.4 to 1.0)
+      canvas.drawCircle(Offset(x, y), radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// タイトル画面の背景を描画するCustomPainter
+class TitleScreenBackgroundPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 1. 空と遠景を最初に描画
+    _drawSkyAndScenery(canvas, size);
+
+    // 2. 電車内の前景要素（座席など）を描画
+    _drawTrainInteriorElements(canvas, size);
+
+    // 3. 窓枠を描画 (窓枠の内側は透過し、下の空が見える前提)
+    _drawWindowFrame(canvas, size);
+
+    // 4. ガラス効果を最後に描画
+    _drawGlassEffects(canvas, size);
+  }
+
+  void _drawSkyAndScenery(Canvas canvas, Size size) {
+    // 早朝の空のグラデーション
+    final skyPaint = Paint()
+      ..shader = ui.Gradient.linear(
+        Offset(size.width / 2, 0),
+        Offset(size.width / 2, size.height),
+        [
+          const Color(0xFF3A3A5A), // 夜の名残の濃い紫
+          const Color(0xFF6A5D7B), // 夜明け前の薄紫
+          const Color(0xFFB88AAB), // ピンクがかった紫
+          const Color(0xFFFFB08F), // 朝焼けのオレンジ
+          const Color(0xFFADD8E6), // 明るい水色 (空の上部へ)
+        ],
+        [0.0, 0.3, 0.55, 0.75, 1.0],
+      );
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), skyPaint);
+
+    // 雲の描画 (複数のレイヤーで奥行きを出す)
+    _drawClouds(canvas, size);
+
+    // 遠景のシルエット (よりディテールアップ)
+    final silhouettePaint = Paint()..color = const Color(0xFF424242).withOpacity(0.5);
+    final path = Path();
+    path.moveTo(0, size.height * 0.75);
+    path.cubicTo(size.width * 0.1, size.height * 0.7, size.width * 0.15, size.height * 0.78, size.width * 0.25, size.height * 0.72);
+    path.lineTo(size.width * 0.3, size.height * 0.75);
+    path.cubicTo(size.width * 0.4, size.height * 0.68, size.width * 0.45, size.height * 0.75, size.width * 0.55, size.height * 0.7);
+    path.lineTo(size.width * 0.6, size.height * 0.73);
+    path.cubicTo(size.width * 0.7, size.height * 0.65, size.width * 0.8, size.height * 0.75, size.width * 0.9, size.height * 0.72);
+    path.lineTo(size.width, size.height * 0.76);
+    path.lineTo(size.width, size.height);
+    path.lineTo(0, size.height);
+    path.close();
+    canvas.drawPath(path, silhouettePaint);
+
+    final distantSilhouettePaint = Paint()..color = const Color(0xFF616161).withOpacity(0.3);
+    final distantPath = Path();
+    distantPath.moveTo(0, size.height * 0.8);
+    distantPath.quadraticBezierTo(size.width * 0.2, size.height * 0.75, size.width * 0.4, size.height * 0.78);
+    distantPath.quadraticBezierTo(size.width * 0.6, size.height * 0.82, size.width * 0.8, size.height * 0.77);
+    distantPath.lineTo(size.width, size.height * 0.81);
+    distantPath.lineTo(size.width, size.height);
+    distantPath.lineTo(0, size.height);
+    distantPath.close();
+    canvas.drawPath(distantPath, distantSilhouettePaint);
+  }
+
+  void _drawClouds(Canvas canvas, Size size) {
+    final cloudPaint = Paint();
+    final random = math.Random(123); // シード固定で毎回同じ雲に
+
+    // 雲の色々なバリエーション
+    List<CloudProps> cloudProperties = [
+      CloudProps(color: Colors.white.withOpacity(0.5), blurRadius: 20.0, count: 3, yFactor: 0.3, sizeFactor: 0.25),
+      CloudProps(color: Colors.grey[300]!.withOpacity(0.4), blurRadius: 30.0, count: 2, yFactor: 0.4, sizeFactor: 0.35),
+      CloudProps(color: Colors.white.withOpacity(0.6), blurRadius: 15.0, count: 4, yFactor: 0.25, sizeFactor: 0.2),
+    ];
+
+    for (var props in cloudProperties) {
+      cloudPaint
+        ..color = props.color
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, props.blurRadius);
+      for (int i = 0; i < props.count; i++) {
+        final cloudWidth = size.width * (random.nextDouble() * 0.2 + props.sizeFactor); // 幅をランダムに
+        final cloudHeight = cloudWidth * (random.nextDouble() * 0.3 + 0.4); // 高さを幅に応じて
+        final x = random.nextDouble() * (size.width - cloudWidth);
+        final y = random.nextDouble() * (size.height * props.yFactor);
+        canvas.drawOval(Rect.fromLTWH(x, y, cloudWidth, cloudHeight), cloudPaint);
+      }
+    }
+  }
+
+  void _drawTrainInteriorElements(Canvas canvas, Size size) {
+    // 窓枠の内側の壁 (ゲーム中と似た色合いで)
+    // final wallPaint = Paint()..color = const Color(0xFFFFF8E1); // TrainInteriorPainterの壁の色に近いもの
+    // canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), wallPaint); // 全面塗りは削除
+
+    // 座席の背もたれの上部が少し見える (より具体的に窓の下部に合わせて描画)
+    final seatTopPaint = Paint()..color = const Color(0xFF8D6E63); // より濃い木目調（TrainInteriorPainterの座席木部）
+    final seatShadowPaint = Paint()..color = Colors.black.withOpacity(0.15);
+    double seatVisibleHeight = size.height * 0.1;
+    double frameThickness = 25.0; // _drawWindowFrameと合わせる
+    double seatTopY = size.height - frameThickness - seatVisibleHeight;
+
+    // 座席の背もたれの描画範囲を窓枠の下に合わせる
+    Rect seatRect = Rect.fromLTWH(
+        frameThickness,
+        seatTopY,
+        size.width - frameThickness * 2,
+        seatVisibleHeight
+    );
+    // 角丸は窓枠に合わせる必要はないが、少し丸みをつける
+    RRect seatRRect = RRect.fromRectAndCorners(seatRect, bottomLeft: Radius.circular(5), bottomRight: Radius.circular(5));
+    canvas.drawRRect(seatRRect, seatTopPaint);
+
+    // 座席に簡単な影
+    canvas.drawRect(Rect.fromLTWH(seatRect.left, seatRect.top, seatRect.width, 5), seatShadowPaint);
+  }
+
+  void _drawWindowFrame(Canvas canvas, Size size) {
+    // TrainInteriorPainterの窓枠デザインを参考にする
+    double frameThickness = 25.0;
+    // double innerPadding = 5.0; // 未使用なのでコメントアウト
+    double cornerRadiusValue = 20.0;
+    Radius cornerRadius = Radius.circular(cornerRadiusValue);
+
+    // 外枠 (金属風 - 暗め) - この部分が画面全体を塗りつぶしていたので削除
+    // final outerFramePaint = Paint()
+    //   ..shader = ui.Gradient.linear(
+    //     Offset(0,0), Offset(size.width, size.height),
+    //     [const Color(0xFF757575), const Color(0xFF424242)],
+    //   )
+    //   ..style = PaintingStyle.fill;
+    // RRect outerRRect = RRect.fromRectAndRadius(
+    //     Rect.fromLTWH(0, 0, size.width, size.height), cornerRadius);
+    // canvas.drawRRect(outerRRect, outerFramePaint);
+
+    // 窓の開口部を定義 (この内側に空が見える)
+    Rect windowOpeningRect = Rect.fromLTWH(
+      frameThickness,
+      frameThickness,
+      size.width - frameThickness * 2,
+      // 座席の高さを考慮して、窓の下端を少し上げる
+      size.height - frameThickness * 2 - (size.height * 0.1) - frameThickness, 
+    );
+    RRect windowOpeningRRect = RRect.fromRectAndRadius(windowOpeningRect, Radius.circular(cornerRadiusValue - frameThickness / 2 > 0 ? cornerRadiusValue - frameThickness / 2 : 5));
+
+    // 1. 金属風の外枠の「フチ」 (strokeで)
+    final metalEdgePaint = Paint()
+        ..shader = ui.Gradient.linear(Offset.zero, Offset(size.width, 0), [const Color(0xFFBDBDBD), const Color(0xFFE0E0E0), const Color(0xFFBDBDBD)])
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = frameThickness;
+    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(frameThickness/2, frameThickness/2, size.width-frameThickness, size.height-frameThickness), cornerRadius), metalEdgePaint);
+
+    // 2. 木目調の内枠の「フチ」
+    final woodEdgePaint = Paint()
+        ..shader = ui.Gradient.linear(Offset.zero, Offset(size.width, 0), [const Color(0xFF8D6E63), const Color(0xFFA1887F), const Color(0xFF8D6E63)])
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = frameThickness - 8; // 金属枠より少し細く
+    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(frameThickness/2 + 4, frameThickness/2 + 4, size.width-frameThickness-8, size.height-frameThickness-8), Radius.circular(cornerRadius.x - 4 > 0 ? cornerRadius.x -4 : 2)), woodEdgePaint);
+
+    // ハイライトとシャドウで立体感を出す
+    final highlightPaint = Paint()
+      ..color = Colors.white.withOpacity(0.15)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    final shadowPaint = Paint()
+      ..color = Colors.black.withOpacity(0.2)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
+    // 外枠のハイライトとシャドウ
+    Path highlightPath = Path()
+      ..addRRect(RRect.fromLTRBAndCorners(
+          frameThickness / 2,
+          frameThickness / 2,
+          size.width - frameThickness / 2 - 1,
+          size.height * 0.6,
+          topLeft: cornerRadius,
+          topRight: cornerRadius,
+          bottomLeft: Radius.zero,
+          bottomRight: Radius.zero));
+    canvas.drawPath(highlightPath, highlightPaint);
+    
+    Path shadowPath = Path()
+      ..addRRect(RRect.fromLTRBAndCorners(
+          frameThickness / 2 + 1,
+          size.height * 0.4,
+          size.width - frameThickness / 2,
+          size.height - frameThickness / 2 - 1,
+          topLeft: Radius.zero,
+          topRight: Radius.zero,
+          bottomLeft: cornerRadius,
+          bottomRight: cornerRadius));
+    canvas.drawPath(shadowPath, shadowPaint);
+  }
+
+  void _drawGlassEffects(Canvas canvas, Size size) {
+    double frameThickness = 25.0;
+    Rect glassRect = Rect.fromLTWH(
+      frameThickness,
+      frameThickness,
+      size.width - frameThickness * 2,
+      size.height - frameThickness * 2,
+    );
+    RRect glassRRect = RRect.fromRectAndRadius(glassRect, Radius.circular(20.0 - frameThickness / 2 > 0 ? 20.0 - frameThickness / 2 : 5));
+
+    // ガラスの光沢 (斜めのグラデーション)
+    final glassShinePaint = Paint()
+      ..shader = ui.Gradient.linear(
+        Offset(glassRect.left + glassRect.width * 0.1, glassRect.top + glassRect.height * 0.1),
+        Offset(glassRect.right - glassRect.width * 0.1, glassRect.bottom - glassRect.height * 0.1),
+        [
+          Colors.white.withOpacity(0.08),
+          Colors.white.withOpacity(0.02),
+          Colors.transparent,
+          Colors.white.withOpacity(0.01),
+          Colors.white.withOpacity(0.05),
+        ],
+        [0.0, 0.3, 0.5, 0.7, 1.0]
+      );
+    canvas.drawRRect(glassRRect, glassShinePaint);
+
+    // 朝露や汚れ（ほんの少し）
+    final random = math.Random(456);
+    final dewPaint = Paint()..color = Colors.white.withOpacity(0.05);
+    for(int i=0; i<15; i++){
+        double x = glassRect.left + random.nextDouble() * glassRect.width;
+        double y = glassRect.top + random.nextDouble() * glassRect.height;
+        double radius = random.nextDouble() * 1.5 + 0.5;
+        canvas.drawCircle(Offset(x,y), radius, dewPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// Helper class for cloud properties
+class CloudProps {
+  final Color color;
+  final double blurRadius;
+  final int count;
+  final double yFactor; // 0.0 (top) to 1.0 (bottom)
+  final double sizeFactor; // relative to screen width
+
+  CloudProps({
+    required this.color,
+    required this.blurRadius,
+    required this.count,
+    required this.yFactor,
+    required this.sizeFactor,
+  });
+}
+
 class EyeDetectionScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
   
@@ -1083,13 +1359,13 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                   style: GoogleFonts.mochiyPopOne(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.blueAccent),
                 ),
                 const SizedBox(height: 18),
-                _howToRow(Icons.remove_red_eye, '目を閉じると電車が進みます！'),
+                _howToRow(Icons.score, '出来るだけ長く目を閉じて眠ろう！目をつぶっている時間が長いほどスコアUP！'), // アイコンとテキスト変更
                 const SizedBox(height: 12),
-                _howToRow(Icons.star, '長く目を閉じるほどスコアUP！'),
+                _howToRow(Icons.flag, '「福工大前」駅が最終目的地だよ！'), // アイコンとテキスト変更
                 const SizedBox(height: 12),
-                _howToRow(Icons.train, '降りたい駅で「降りる！」ボタンを押そう！'),
+                _howToRow(Icons.train, '目的の駅「福工大前」で「降りる！」ボタンを押してクリア！'), // テキスト変更
                 const SizedBox(height: 12),
-                _howToRow(Icons.warning_amber, '寝過ごしや連続で目を閉じすぎるとゲームオーバー！'),
+                _howToRow(Icons.warning_amber, '寝過ごして福工大を通り過ぎたり、降りる駅を間違えるとゲームオーバー！'), // テキスト変更
                 const SizedBox(height: 24),
                 ElevatedButton.icon(
                   onPressed: () => Navigator.pop(context),
@@ -1159,34 +1435,46 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     return Scaffold(
       body: Stack(
         children: [
-          // 背景
+          // 新しいタイトル画面背景 (電車の窓風)
           Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.blue[900]!,
-                    Colors.blue[700]!,
-                  ],
-                ),
-              ),
+            child: CustomPaint(
+              painter: TitleScreenBackgroundPainter(),
             ),
           ),
-          // 電車のイラスト（背景）
-          Positioned(
-            bottom: -50,
-            left: -100,
-            child: Transform.scale(
-              scale: 1.5,
-              child: Icon(
-                Icons.train,
-                size: 300,
-                color: Colors.white.withOpacity(0.1),
-              ),
-            ),
-          ),
+          // 昇る太陽の表現は削除
+          // Positioned(
+          //   bottom: MediaQuery.of(context).size.height * 0.05, // 画面下部から少し上
+          //   left: 0,
+          //   right: 0,
+          //   child: Center(
+          //     child: Container(
+          //       width: MediaQuery.of(context).size.width * 0.8, // 幅を画面幅の80%に
+          //       height: 100, // 高さを適度に
+          //       decoration: BoxDecoration(
+          //         shape: BoxShape.circle,
+          //         gradient: RadialGradient(
+          //           colors: [
+          //             Colors.yellow.withOpacity(0.3),
+          //             Colors.orange.withOpacity(0.1),
+          //             Colors.transparent,
+          //           ],
+          //           stops: const [0.0, 0.4, 1.0],
+          //         ),
+          //       ),
+          //     ),
+          //   ),
+          // ),
+          // 電車のイラスト（背景）も一旦削除して様子見
+          // Positioned(
+          //   bottom: 10, // Y位置調整
+          //   left: 0,
+          //   right: 0,
+          //   child: Icon(
+          //     Icons.train,
+          //     size: 120,    // サイズ少し調整
+          //     color: Colors.black.withOpacity(0.04), // 色を黒ベースの透明に
+          //   ),
+          // ),
           // メインコンテンツ
           if (!_isGameStarted && !_isDebugMode)
             Center(
@@ -1320,7 +1608,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                       child: Column(
                         children: [
                           Text(
-                            '寝過ごさないように気をつけろ！',
+                            'なんとか電車には乗り込めたKOU君だが既に疲れてウトウト...',
                             style: GoogleFonts.mochiyPopOne(
                               color: Colors.white,
                               fontSize: 18,
@@ -1328,7 +1616,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                           ),
                           const SizedBox(height: 10),
                           Text(
-                            '目を閉じてる時間が長いほどスコアUP！',
+                            '果たして寝過ごさずに福工大前にたどり着けるのか！？',
                             style: GoogleFonts.mochiyPopOne(
                               color: Colors.white,
                               fontSize: 18,
