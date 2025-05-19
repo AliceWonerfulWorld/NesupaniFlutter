@@ -40,6 +40,8 @@ dependencies:
   provider: ^6.1.1
   js: ^0.6.7  # JavaScript相互運用用
   universal_html: ^2.2.4  # Web API用
+  just_audio: ^0.9.36
+  google_fonts: ^6.1.0  # Google Fontsパッケージを追加
 
 dev_dependencies:
   flutter_test:
@@ -64,8 +66,8 @@ flutter:
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
-  
-    
+  assets:
+    - assets/sounds/train_sound.mp3
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
