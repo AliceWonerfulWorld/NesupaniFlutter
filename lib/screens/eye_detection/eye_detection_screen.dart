@@ -99,6 +99,10 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   AudioPlayer? _audioPlayer;
   bool _isPlayingSound = false;
 
+  // ゲームオーバー・クリアSE用 AudioPlayer
+  AudioPlayer? _gameOverSoundPlayer;
+  AudioPlayer? _gameClearSoundPlayer;
+
   @override
   void initState() {
     super.initState();
@@ -758,6 +762,9 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   Future<void> _resetToTitle() async {
     print('タイトルに戻ります: SE停止試行開始');
     await _stopTrainSound();
+    // ゲームオーバー・クリアSEも停止
+    await _gameOverSoundPlayer?.stop();
+    await _gameClearSoundPlayer?.stop();
     print('タイトルに戻ります: SE停止完了');
     
     setState(() {
@@ -799,6 +806,15 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     
     await _stopTrainSound();
     print('ゲームオーバー処理: SE停止完了');
+
+    // ゲームオーバー/クリアSEの再生
+    if (isClear) {
+      _gameClearSoundPlayer?.seek(Duration.zero); // 再生位置を最初に戻す
+      _gameClearSoundPlayer?.play();
+    } else {
+      _gameOverSoundPlayer?.seek(Duration.zero); // 再生位置を最初に戻す
+      _gameOverSoundPlayer?.play();
+    }
     
     showDialog(
       context: context,
@@ -836,7 +852,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
               const SizedBox(height: 16),
               Text(
                 isClear ? 'ゲームクリア！' : 'ゲームオーバー',
-                style: TextStyle(
+                style: GoogleFonts.mochiyPopOne(
                   fontSize: 30,
                   fontWeight: FontWeight.bold,
                   color: isClear ? Colors.amber[800] : Colors.redAccent,
@@ -846,7 +862,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
               const SizedBox(height: 18),
               Text(
                 message ?? (isClear ? 'おめでとうございます！' : 'また挑戦してね！'),
-                style: const TextStyle(fontSize: 18, color: Colors.black87, height: 1.5),
+                style: GoogleFonts.mochiyPopOne(fontSize: 18, color: Colors.black87, height: 1.5),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 18),
@@ -888,7 +904,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                   await _resetToTitle();
                 },
                 icon: const Icon(Icons.home),
-                label: const Text('タイトルへ戻る'),
+                label: Text('タイトルへ戻る', style: GoogleFonts.mochiyPopOne()),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: isClear ? Colors.amber : Colors.pinkAccent,
                   foregroundColor: Colors.white,
@@ -1062,9 +1078,9 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
               children: [
                 const Icon(Icons.info_outline, color: Colors.blueAccent, size: 48),
                 const SizedBox(height: 12),
-                const Text(
+                Text(
                   '遊び方',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+                  style: GoogleFonts.mochiyPopOne(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.blueAccent),
                 ),
                 const SizedBox(height: 18),
                 _howToRow(Icons.remove_red_eye, '目を閉じると電車が進みます！'),
@@ -1078,7 +1094,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                 ElevatedButton.icon(
                   onPressed: () => Navigator.pop(context),
                   icon: const Icon(Icons.check),
-                  label: const Text('閉じる'),
+                  label: Text('閉じる', style: GoogleFonts.mochiyPopOne()),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent,
                     foregroundColor: Colors.white,
@@ -1103,7 +1119,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(fontSize: 18, color: Colors.black87, height: 1.4),
+            style: GoogleFonts.mochiyPopOne(fontSize: 18, color: Colors.black87, height: 1.4),
           ),
         ),
       ],
@@ -1127,6 +1143,12 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     }
     _audioPlayer?.dispose();
     _audioPlayer = null;
+    
+    // ゲームオーバー・クリアSEの解放
+    _gameOverSoundPlayer?.dispose();
+    _gameOverSoundPlayer = null;
+    _gameClearSoundPlayer?.dispose();
+    _gameClearSoundPlayer = null;
     
     print('dispose: リソース解放完了');
     super.dispose();
@@ -1295,19 +1317,19 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                         color: Colors.white.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(15),
                       ),
-                      child: const Column(
+                      child: Column(
                         children: [
                           Text(
                             '寝過ごさないように気をつけろ！',
-                            style: TextStyle(
+                            style: GoogleFonts.mochiyPopOne(
                               color: Colors.white,
                               fontSize: 18,
                             ),
                           ),
-                          SizedBox(height: 10),
+                          const SizedBox(height: 10),
                           Text(
                             '目を閉じてる時間が長いほどスコアUP！',
-                            style: TextStyle(
+                            style: GoogleFonts.mochiyPopOne(
                               color: Colors.white,
                               fontSize: 18,
                             ),
@@ -1514,7 +1536,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.85),
+                              color: Colors.white.withOpacity(0.5), // 透明度を 0.85 から 0.5 に変更
                               borderRadius: BorderRadius.circular(28),
                               boxShadow: [
                                 BoxShadow(
@@ -1950,6 +1972,15 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     _audioPlayer = AudioPlayer();
     await _audioPlayer?.setAsset('assets/sounds/train_sound.mp3');
     await _audioPlayer?.setLoopMode(LoopMode.all);
+
+    // ゲームオーバー・クリアSEの初期化
+    _gameOverSoundPlayer = AudioPlayer();
+    await _gameOverSoundPlayer?.setAsset('assets/sounds/game_over.mp3'); 
+    // ループ再生はしないので LoopMode.off (デフォルト)
+
+    _gameClearSoundPlayer = AudioPlayer();
+    await _gameClearSoundPlayer?.setAsset('assets/sounds/game_clear.mp3');
+    // ループ再生はしないので LoopMode.off (デフォルト)
   }
 
   Future<void> _playTrainSound() async {
