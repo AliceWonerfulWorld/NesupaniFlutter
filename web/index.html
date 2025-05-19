@@ -39,14 +39,14 @@
   <!-- This script adds the flutter initialization JS code -->
   <script src="flutter.js" defer></script>
 
-  <!-- mediapipe tasks-vision -->
-  <!-- <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js" crossorigin="anonymous"></script> -->
-  <!-- <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" crossorigin="anonymous"></script> -->
-  <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script> -->
-  <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/vision_bundle.js" crossorigin="anonymous"></script> -->
-  <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/dist/vision_bundle.js" crossorigin="anonymous"></script> -->
-  <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/files/vision_bundle.js" crossorigin="anonymous"></script> -->
+  <!-- MediaPipe Tasks Vision -->
+  <!-- ES Module バージョン (こちらを主に使用) -->
   <script type="module" id="mediapipe-tasks-vision-module" src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/vision_bundle.mjs" crossorigin="anonymous"></script>
+  
+  <!-- ES5 バージョン (非モジュール) - 404エラーのためコメントアウト -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/vision_bundle.js" crossorigin="anonymous"></script> -->
+  
+  <!-- グローバルオブジェクトを準備するスクリプト (ES Moduleから) -->
   <script type="module">
     import { FilesetResolver, FaceDetector, FaceLandmarker } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/vision_bundle.mjs';
     window.MyMediaPipeGlobal = {
@@ -54,16 +54,27 @@
       FaceDetector,
       FaceLandmarker
     };
-    console.log('MyMediaPipeGlobal set:', window.MyMediaPipeGlobal);
+    console.log('MyMediaPipeGlobal set via ES module:', window.MyMediaPipeGlobal);
   </script>
-  <!-- <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/face-api.js"></script> -->
-
-  <!-- Comment out or remove old TensorFlow.js and Face-API.js script tags -->
-  <!--
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0"></script>
-  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
-  -->
+  
+  <!-- 非モジュール方式でのグローバルオブジェクト設定 (vision_bundle.js が存在しないため、このブロックは機能しない可能性が高い) -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      setTimeout(function() {
+        if (!window.MyMediaPipeGlobal && window.vision && window.vision.FilesetResolver) {
+          console.log('Attempting to set MyMediaPipeGlobal from window.vision (alternative for ES5 if loaded)');
+          window.MyMediaPipeGlobal = {
+            FilesetResolver: window.vision.FilesetResolver,
+            FaceDetector: window.vision.FaceDetector, // Ensure these are correct paths if vision_bundle.js changes structure
+            FaceLandmarker: window.vision.FaceLandmarker
+          };
+          console.log('MyMediaPipeGlobal set via window.vision:', window.MyMediaPipeGlobal);
+        } else if (!window.MyMediaPipeGlobal) {
+            console.warn('MyMediaPipeGlobal not set. MediaPipe features may not work.');
+        }
+      }, 1500); // 少し長めに待ってから確認
+    });
+  </script>
 </head>
 <body>
   <script>

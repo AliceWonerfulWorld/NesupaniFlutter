@@ -4,6 +4,7 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart' as
 import 'package:nesupani/screens/eye_detection/painters/train_interior_painter.dart';
 import 'package:nesupani/screens/eye_detection/painters/face_landmark_painter.dart';
 import 'package:nesupani/screens/eye_detection/painters/mediapipe_face_painter.dart'; // MediaPipeFacePainterの追加
+import 'package:nesupani/screens/eye_detection/painters/face_distance_warning_painter.dart'; // 追加
 import 'package:nesupani/screens/eye_detection/widgets/animated_scenery_widget.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -14,9 +15,288 @@ import 'dart:ui' as ui;
 import 'dart:js_util' as js_util;
 import 'dart:ui_web' if (dart.library.io) 'dart:ui' as ui_web;
 import 'dart:math' as math; // math関数を使用するためのインポート
+import 'package:flutter/services.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:google_fonts/google_fonts.dart';  // Google Fontsをインポート
 
 // MediaPipe Task objects will be handled by js_util typically,
 // but if direct JS interop with @JS is needed for some structures, keep js.dart.
+
+// 星空を描画するCustomPainter
+class StarPainter extends CustomPainter {
+  final int starCount;
+  final Color starColor;
+  final math.Random random = math.Random();
+
+  StarPainter({this.starCount = 150, required this.starColor});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint();
+    for (int i = 0; i < starCount; i++) {
+      final x = random.nextDouble() * size.width;
+      final y = random.nextDouble() * size.height;
+      final radius = random.nextDouble() * 1.2 + 0.3; // 星の半径 (0.3 to 1.5)
+      paint.color = starColor.withOpacity(random.nextDouble() * 0.6 + 0.4); // 透明度 (0.4 to 1.0)
+      canvas.drawCircle(Offset(x, y), radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// タイトル画面の背景を描画するCustomPainter
+class TitleScreenBackgroundPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 1. 空と遠景を最初に描画
+    _drawSkyAndScenery(canvas, size);
+
+    // 2. 電車内の前景要素（座席など）を描画
+    _drawTrainInteriorElements(canvas, size);
+
+    // 3. 窓枠を描画 (窓枠の内側は透過し、下の空が見える前提)
+    _drawWindowFrame(canvas, size);
+
+    // 4. ガラス効果を最後に描画
+    _drawGlassEffects(canvas, size);
+  }
+
+  void _drawSkyAndScenery(Canvas canvas, Size size) {
+    // 早朝の空のグラデーション
+    final skyPaint = Paint()
+      ..shader = ui.Gradient.linear(
+        Offset(size.width / 2, 0),
+        Offset(size.width / 2, size.height),
+        [
+          const Color(0xFF3A3A5A), // 夜の名残の濃い紫
+          const Color(0xFF6A5D7B), // 夜明け前の薄紫
+          const Color(0xFFB88AAB), // ピンクがかった紫
+          const Color(0xFFFFB08F), // 朝焼けのオレンジ
+          const Color(0xFFADD8E6), // 明るい水色 (空の上部へ)
+        ],
+        [0.0, 0.3, 0.55, 0.75, 1.0],
+      );
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), skyPaint);
+
+    // 雲の描画 (複数のレイヤーで奥行きを出す)
+    _drawClouds(canvas, size);
+
+    // 遠景のシルエット (よりディテールアップ)
+    final silhouettePaint = Paint()..color = const Color(0xFF424242).withOpacity(0.5);
+    final path = Path();
+    path.moveTo(0, size.height * 0.75);
+    path.cubicTo(size.width * 0.1, size.height * 0.7, size.width * 0.15, size.height * 0.78, size.width * 0.25, size.height * 0.72);
+    path.lineTo(size.width * 0.3, size.height * 0.75);
+    path.cubicTo(size.width * 0.4, size.height * 0.68, size.width * 0.45, size.height * 0.75, size.width * 0.55, size.height * 0.7);
+    path.lineTo(size.width * 0.6, size.height * 0.73);
+    path.cubicTo(size.width * 0.7, size.height * 0.65, size.width * 0.8, size.height * 0.75, size.width * 0.9, size.height * 0.72);
+    path.lineTo(size.width, size.height * 0.76);
+    path.lineTo(size.width, size.height);
+    path.lineTo(0, size.height);
+    path.close();
+    canvas.drawPath(path, silhouettePaint);
+
+    final distantSilhouettePaint = Paint()..color = const Color(0xFF616161).withOpacity(0.3);
+    final distantPath = Path();
+    distantPath.moveTo(0, size.height * 0.8);
+    distantPath.quadraticBezierTo(size.width * 0.2, size.height * 0.75, size.width * 0.4, size.height * 0.78);
+    distantPath.quadraticBezierTo(size.width * 0.6, size.height * 0.82, size.width * 0.8, size.height * 0.77);
+    distantPath.lineTo(size.width, size.height * 0.81);
+    distantPath.lineTo(size.width, size.height);
+    distantPath.lineTo(0, size.height);
+    distantPath.close();
+    canvas.drawPath(distantPath, distantSilhouettePaint);
+  }
+
+  void _drawClouds(Canvas canvas, Size size) {
+    final cloudPaint = Paint();
+    final random = math.Random(123); // シード固定で毎回同じ雲に
+
+    // 雲の色々なバリエーション
+    List<CloudProps> cloudProperties = [
+      CloudProps(color: Colors.white.withOpacity(0.5), blurRadius: 20.0, count: 3, yFactor: 0.3, sizeFactor: 0.25),
+      CloudProps(color: Colors.grey[300]!.withOpacity(0.4), blurRadius: 30.0, count: 2, yFactor: 0.4, sizeFactor: 0.35),
+      CloudProps(color: Colors.white.withOpacity(0.6), blurRadius: 15.0, count: 4, yFactor: 0.25, sizeFactor: 0.2),
+    ];
+
+    for (var props in cloudProperties) {
+      cloudPaint
+        ..color = props.color
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, props.blurRadius);
+      for (int i = 0; i < props.count; i++) {
+        final cloudWidth = size.width * (random.nextDouble() * 0.2 + props.sizeFactor); // 幅をランダムに
+        final cloudHeight = cloudWidth * (random.nextDouble() * 0.3 + 0.4); // 高さを幅に応じて
+        final x = random.nextDouble() * (size.width - cloudWidth);
+        final y = random.nextDouble() * (size.height * props.yFactor);
+        canvas.drawOval(Rect.fromLTWH(x, y, cloudWidth, cloudHeight), cloudPaint);
+      }
+    }
+  }
+
+  void _drawTrainInteriorElements(Canvas canvas, Size size) {
+    // 窓枠の内側の壁 (ゲーム中と似た色合いで)
+    // final wallPaint = Paint()..color = const Color(0xFFFFF8E1); // TrainInteriorPainterの壁の色に近いもの
+    // canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), wallPaint); // 全面塗りは削除
+
+    // 座席の背もたれの上部が少し見える (より具体的に窓の下部に合わせて描画)
+    final seatTopPaint = Paint()..color = const Color(0xFF8D6E63); // より濃い木目調（TrainInteriorPainterの座席木部）
+    final seatShadowPaint = Paint()..color = Colors.black.withOpacity(0.15);
+    double seatVisibleHeight = size.height * 0.1;
+    double frameThickness = 25.0; // _drawWindowFrameと合わせる
+    double seatTopY = size.height - frameThickness - seatVisibleHeight;
+
+    // 座席の背もたれの描画範囲を窓枠の下に合わせる
+    Rect seatRect = Rect.fromLTWH(
+        frameThickness,
+        seatTopY,
+        size.width - frameThickness * 2,
+        seatVisibleHeight
+    );
+    // 角丸は窓枠に合わせる必要はないが、少し丸みをつける
+    RRect seatRRect = RRect.fromRectAndCorners(seatRect, bottomLeft: Radius.circular(5), bottomRight: Radius.circular(5));
+    canvas.drawRRect(seatRRect, seatTopPaint);
+
+    // 座席に簡単な影
+    canvas.drawRect(Rect.fromLTWH(seatRect.left, seatRect.top, seatRect.width, 5), seatShadowPaint);
+  }
+
+  void _drawWindowFrame(Canvas canvas, Size size) {
+    // TrainInteriorPainterの窓枠デザインを参考にする
+    double frameThickness = 25.0;
+    // double innerPadding = 5.0; // 未使用なのでコメントアウト
+    double cornerRadiusValue = 20.0;
+    Radius cornerRadius = Radius.circular(cornerRadiusValue);
+
+    // 外枠 (金属風 - 暗め) - この部分が画面全体を塗りつぶしていたので削除
+    // final outerFramePaint = Paint()
+    //   ..shader = ui.Gradient.linear(
+    //     Offset(0,0), Offset(size.width, size.height),
+    //     [const Color(0xFF757575), const Color(0xFF424242)],
+    //   )
+    //   ..style = PaintingStyle.fill;
+    // RRect outerRRect = RRect.fromRectAndRadius(
+    //     Rect.fromLTWH(0, 0, size.width, size.height), cornerRadius);
+    // canvas.drawRRect(outerRRect, outerFramePaint);
+
+    // 窓の開口部を定義 (この内側に空が見える)
+    Rect windowOpeningRect = Rect.fromLTWH(
+      frameThickness,
+      frameThickness,
+      size.width - frameThickness * 2,
+      // 座席の高さを考慮して、窓の下端を少し上げる
+      size.height - frameThickness * 2 - (size.height * 0.1) - frameThickness, 
+    );
+    RRect windowOpeningRRect = RRect.fromRectAndRadius(windowOpeningRect, Radius.circular(cornerRadiusValue - frameThickness / 2 > 0 ? cornerRadiusValue - frameThickness / 2 : 5));
+
+    // 1. 金属風の外枠の「フチ」 (strokeで)
+    final metalEdgePaint = Paint()
+        ..shader = ui.Gradient.linear(Offset.zero, Offset(size.width, 0), [const Color(0xFFBDBDBD), const Color(0xFFE0E0E0), const Color(0xFFBDBDBD)])
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = frameThickness;
+    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(frameThickness/2, frameThickness/2, size.width-frameThickness, size.height-frameThickness), cornerRadius), metalEdgePaint);
+
+    // 2. 木目調の内枠の「フチ」
+    final woodEdgePaint = Paint()
+        ..shader = ui.Gradient.linear(Offset.zero, Offset(size.width, 0), [const Color(0xFF8D6E63), const Color(0xFFA1887F), const Color(0xFF8D6E63)])
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = frameThickness - 8; // 金属枠より少し細く
+    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(frameThickness/2 + 4, frameThickness/2 + 4, size.width-frameThickness-8, size.height-frameThickness-8), Radius.circular(cornerRadius.x - 4 > 0 ? cornerRadius.x -4 : 2)), woodEdgePaint);
+
+    // ハイライトとシャドウで立体感を出す
+    final highlightPaint = Paint()
+      ..color = Colors.white.withOpacity(0.15)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    final shadowPaint = Paint()
+      ..color = Colors.black.withOpacity(0.2)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
+    // 外枠のハイライトとシャドウ
+    Path highlightPath = Path()
+      ..addRRect(RRect.fromLTRBAndCorners(
+          frameThickness / 2,
+          frameThickness / 2,
+          size.width - frameThickness / 2 - 1,
+          size.height * 0.6,
+          topLeft: cornerRadius,
+          topRight: cornerRadius,
+          bottomLeft: Radius.zero,
+          bottomRight: Radius.zero));
+    canvas.drawPath(highlightPath, highlightPaint);
+    
+    Path shadowPath = Path()
+      ..addRRect(RRect.fromLTRBAndCorners(
+          frameThickness / 2 + 1,
+          size.height * 0.4,
+          size.width - frameThickness / 2,
+          size.height - frameThickness / 2 - 1,
+          topLeft: Radius.zero,
+          topRight: Radius.zero,
+          bottomLeft: cornerRadius,
+          bottomRight: cornerRadius));
+    canvas.drawPath(shadowPath, shadowPaint);
+  }
+
+  void _drawGlassEffects(Canvas canvas, Size size) {
+    double frameThickness = 25.0;
+    Rect glassRect = Rect.fromLTWH(
+      frameThickness,
+      frameThickness,
+      size.width - frameThickness * 2,
+      size.height - frameThickness * 2,
+    );
+    RRect glassRRect = RRect.fromRectAndRadius(glassRect, Radius.circular(20.0 - frameThickness / 2 > 0 ? 20.0 - frameThickness / 2 : 5));
+
+    // ガラスの光沢 (斜めのグラデーション)
+    final glassShinePaint = Paint()
+      ..shader = ui.Gradient.linear(
+        Offset(glassRect.left + glassRect.width * 0.1, glassRect.top + glassRect.height * 0.1),
+        Offset(glassRect.right - glassRect.width * 0.1, glassRect.bottom - glassRect.height * 0.1),
+        [
+          Colors.white.withOpacity(0.08),
+          Colors.white.withOpacity(0.02),
+          Colors.transparent,
+          Colors.white.withOpacity(0.01),
+          Colors.white.withOpacity(0.05),
+        ],
+        [0.0, 0.3, 0.5, 0.7, 1.0]
+      );
+    canvas.drawRRect(glassRRect, glassShinePaint);
+
+    // 朝露や汚れ（ほんの少し）
+    final random = math.Random(456);
+    final dewPaint = Paint()..color = Colors.white.withOpacity(0.05);
+    for(int i=0; i<15; i++){
+        double x = glassRect.left + random.nextDouble() * glassRect.width;
+        double y = glassRect.top + random.nextDouble() * glassRect.height;
+        double radius = random.nextDouble() * 1.5 + 0.5;
+        canvas.drawCircle(Offset(x,y), radius, dewPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// Helper class for cloud properties
+class CloudProps {
+  final Color color;
+  final double blurRadius;
+  final int count;
+  final double yFactor; // 0.0 (top) to 1.0 (bottom)
+  final double sizeFactor; // relative to screen width
+
+  CloudProps({
+    required this.color,
+    required this.blurRadius,
+    required this.count,
+    required this.yFactor,
+    required this.sizeFactor,
+  });
+}
 
 class EyeDetectionScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -92,12 +372,21 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   static const int SCORE_PER_BLINK = 10;
   static const int MAX_CONSECUTIVE_BLINKS = 5;
   Timer? _webDetectTimer;
-  // bool _areFaceAPILoaded = false; // Remove this, use _isMediaPipeInitialized
+  AudioPlayer? _audioPlayer;
+  bool _isPlayingSound = false;
+
+  // ゲームオーバー・クリアSE用 AudioPlayer
+  AudioPlayer? _gameOverSoundPlayer;
+  AudioPlayer? _gameClearSoundPlayer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    
+    // アプリ起動時の確実な初期化（最初のゲームから動くように）
+    _performOneTimeInitialization();
+    
     if (kIsWeb) {
       _initializeMediaPipe();
       // Use ui_web.platformViewRegistry for web
@@ -117,6 +406,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       );
     }
     _initializeCamera(); 
+    _initializeAudio();
 
     // Mobile face detector initialization
     _faceDetector = mlkit_fd.FaceDetector(
@@ -145,6 +435,37 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       });
   }
 
+  // アプリ起動時に1回だけ実行される初期化メソッド
+  void _performOneTimeInitialization() {
+    print('■■■ アプリ起動時の初期化を実行 ■■■');
+    
+    // ゲーム状態を確実にリセット
+    _isGameStarted = false;
+    _isGameOver = false;
+    _score = 0;
+    _currentStation = '';
+    _currentStationIndex = 0;
+    _consecutiveBlinkCount = 0;
+    _wasEyesClosedDuringStation = false;
+    _consecutiveStationsWithEyesClosed = 0;
+    _wasEyesOpen = true;
+    _isDebugMode = false;
+    _debugStatus = '';
+    _debugFace = null;
+    _mediaPipeDebugResult = null;
+    _isEyesOpen = true;
+    
+    // 既存のタイマーを全てキャンセル（念のため）
+    _stationTimer?.cancel();
+    _stationTimer = null;
+    _eyesClosedScoreTimer?.cancel();
+    _eyesClosedScoreTimer = null;
+    _webDetectTimer?.cancel();
+    _webDetectTimer = null;
+    
+    print('■■■ アプリ起動時の初期化完了 ■■■');
+  }
+
   Future<void> _initializeMediaPipe() async {
     if (!kIsWeb) return;
     if (_isMediaPipeInitialized || _isMediaPipeInitializing) { // 既に初期化済みか初期化中なら何もしない
@@ -159,19 +480,37 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
 
       // MyMediaPipeGlobal が利用可能になるまで少し待つ (最大5秒程度)
       dynamic myMediaPipeGlobalJs;
+      bool foundGlobal = false;
       for (int i = 0; i < 100; i++) { // 100ms * 100 = 10秒
         myMediaPipeGlobalJs = js_util.getProperty(html.window, 'MyMediaPipeGlobal');
         if (myMediaPipeGlobalJs != null && js_util.hasProperty(myMediaPipeGlobalJs, 'FilesetResolver')) {
+          foundGlobal = true;
           break;
         }
         await Future.delayed(const Duration(milliseconds: 100));
       }
 
-      if (myMediaPipeGlobalJs == null) {
+      if (!foundGlobal) {
         print("エラー: MyMediaPipeGlobal が window オブジェクトに見つかりません (タイムアウト後)。");
-        _debugStatus = 'MediaPipeグローバルオブジェクト未検出(T)';
-        if (mounted) setState(() {});
-        return;
+        print("MediaPipe scriptの遅延読み込みを試みます...");
+        
+        // スクリプトを強制的にロードしてみる
+        final scriptElement = html.document.createElement('script') as html.ScriptElement;
+        scriptElement.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/vision_bundle.js';
+        scriptElement.type = 'text/javascript';
+        html.document.head?.append(scriptElement);
+        
+        // さらに待機
+        await Future.delayed(const Duration(seconds: 3));
+        
+        // 再度確認
+        myMediaPipeGlobalJs = js_util.getProperty(html.window, 'MyMediaPipeGlobal');
+        if (myMediaPipeGlobalJs == null) {
+          _debugStatus = 'MediaPipeグローバルオブジェクト未検出(T)';
+          if (mounted) setState(() {});
+          _isMediaPipeInitializing = false;
+          return;
+        }
       }
 
       final filesetResolverClass = js_util.getProperty(myMediaPipeGlobalJs, 'FilesetResolver');
@@ -179,6 +518,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         print("エラー: FilesetResolver が MyMediaPipeGlobal に見つかりません。");
         _debugStatus = 'MediaPipe FilesetResolver未検出';
         if (mounted) setState(() {});
+        _isMediaPipeInitializing = false;
         return;
       }
 
@@ -226,8 +566,13 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
 
       if (_mediaPipeFaceDetector != null) {
         print('MediaPipe Face Landmarker instance created successfully.');
+        
+        // JavaScript側の内部的な準備が整うのを少し待つ（経験的な値）
+        await Future.delayed(const Duration(milliseconds: 300)); 
+        print('Short delay after MediaPipe instance creation completed.');
+
         _isMediaPipeInitialized = true;
-        _debugStatus = 'MediaPipe 初期化完了';
+        if(mounted) setState(() => _debugStatus = 'MediaPipe 初期化完了'); // 即座に反映
 
         // FaceDetectorインスタンス作成後、少し待機してみる (例: 1秒)
         print('Waiting a bit after FaceLandmarker creation (1 second)...');
@@ -314,12 +659,16 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
             // ここで早期リターンするか、エラー処理を継続するか検討
           } else {
             // MediaPipeが初期化済みで、ゲームが開始されている or デバッグモードならループ開始
+            // この呼び出しは _startGame に一本化するためコメントアウト、または削除
+            /*
             if ((_isGameStarted || _isDebugMode) && _isMediaPipeInitialized && _mediaPipeFaceDetector != null) {
                  print('Camera initialized and conditions met, starting web face detection loop from _initializeCamera.');
                 _startWebFaceDetectionLoop();
             } else {
                  print('Camera initialized but conditions not met to start loop from _initializeCamera (isGameStarted: $_isGameStarted, isDebugMode: $_isDebugMode, isMediaPipeInitialized: $_isMediaPipeInitialized)');
             }
+            */
+            print('Webcam video dimensions available. Loop start will be handled by _startGame.');
           }
         } else {
           print('Failed to get webcam stream.');
@@ -539,8 +888,16 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     return ratio > 0.25;
   }
 
-  void _startGame() async {
-    print('ゲーム開始: _startGame() が呼び出されました');
+  Future<void> _startGame() async {
+    print('■■■ ゲーム開始処理: 開始 ■■■');
+    
+    // 念のため、既存のタイマーを全てキャンセル
+    _stationTimer?.cancel();
+    _stationTimer = null;
+    _eyesClosedScoreTimer?.cancel();
+    _eyesClosedScoreTimer = null;
+    
+    // 状態リセットと初期設定
     setState(() {
       _isGameStarted = true;
       _isGameOver = false;
@@ -549,91 +906,118 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       _currentStationIndex = 0;
       _consecutiveBlinkCount = 0;
       _wasEyesOpen = true;
-      _debugStatus = 'ゲーム状態準備完了'; // 初期ステータス
+      _isEyesOpen = true; // 初期の目の状態を「開」に明確化
+      _debugStatus = 'ゲーム状態準備中...';
     });
-    print('ゲーム状態: _isGameStarted=$_isGameStarted, _isGameOver=$_isGameOver');
+    
+    print('■■■ カメラ初期化開始 ■■■');
+    await _initializeCamera(); // カメラの準備をまず行う
+    print('■■■ カメラ初期化完了 ■■■');
 
-    await _initializeCamera();
-    print('カメラ初期化完了 (_startGame)');
-
+    // Webの場合はMediaPipe初期化
     if (kIsWeb) {
+      print('■■■ Web: MediaPipe初期化開始 ■■■');
       if (!_isMediaPipeInitialized && !_isMediaPipeInitializing) {
-        print('START_GAME: MediaPipe未初期化。_initializeMediaPipeを呼び出します。');
-        await _initializeMediaPipe(); // MediaPipeを初期化
+        // _initializeMediaPipe内で_isMediaPipeInitializingがtrueになる
+        await _initializeMediaPipe(); 
       }
-      // MediaPipeが初期化されたか、既にされていた場合
-      if (_isMediaPipeInitialized && _mediaPipeFaceDetector != null) {
-        print('START_GAME: MediaPipe初期化済。Web顔検出ループを開始します。');
-        if (mounted) setState(() => _debugStatus = 'MP検出ループ開始試行(SG)');
-        _startWebFaceDetectionLoop();
+      
+      // MediaPipeの初期化が本当に完了するまで待つ (最大15秒)
+      int attempts = 0;
+      while (!_isMediaPipeInitialized && attempts < 150) { 
+        print('MediaPipe完全初期化待機中... 試行: $attempts, 初期化済み: $_isMediaPipeInitialized, 初期化中フラグ: $_isMediaPipeInitializing');
+        await Future.delayed(const Duration(milliseconds: 100));
+        attempts++;
+        // _isMediaPipeInitializing が false になり、_isMediaPipeInitialized が true になるのを期待
+      }
+      
+      if (!_isMediaPipeInitialized) {
+        print('MediaPipe完全初期化待機タイムアウト。顔認識が機能しない可能性があります。');
+        if(mounted) setState(() => _debugStatus = 'MP完全初期化失敗(T)');
+        // タイムアウトしても、カメラとビデオ要素の準備ができていればループは試みる
+        // ただし、MediaPipeインスタンスがないと検出はできない
       } else {
-        print('START_GAME: MediaPipeの準備ができていません。検出ループは開始されません。');
-        if (mounted) setState(() => _debugStatus = 'MP準備未完了(SG)');
+        print('MediaPipe完全初期化成功。');
+        if(mounted) setState(() => _debugStatus = 'MP完全初期化成功');
       }
-    } else {
-      // モバイルの場合はここでカメラのストリーム処理が開始されているはず
+
+      // MediaPipeの初期化成否に関わらず、ループ開始は試みるが、
+      // ループ内部でMediaPipeインスタンスの存在を確認する
+      print('顔認識ループ開始試行 (MP初期化処理後)...');
+      _startWebFaceDetectionLoop();
+
+    } else { // モバイルの場合
+      // モバイルではMediaPipeは使わないので、カメラ初期化後すぐにゲームロジックに進める
+      print('モバイルプラットフォームです。MediaPipe処理はスキップします。');
     }
 
-    _startStationTimer();
-    print('目を閉じているスコア加算タイマー開始');
-    _startEyesClosedScoreTimer(); // 目を閉じている間のスコア加算タイマーを開始
-    print('駅タイマー開始 (startGame)');
-  }
-
-  void _startStationTimer() {
-    _stationTimer?.cancel();
-    _wasEyesClosedDuringStation = false; // 駅が変わるたびにリセット
+    print('■■■ 電車音声再生開始 ■■■');
+    await _playTrainSound();
     
-    _stationTimer = Timer.periodic(Duration(seconds: STATION_CHANGE_SECONDS), (timer) {
-      if (!_isGameStarted || _isGameOver) {
-        timer.cancel();
-        return;
-      }
-      
-      // 駅変更前にスコア計算
-      if (!_isEyesOpen || _wasEyesClosedDuringStation) {
-        // 駅通過中に目を閉じていた場合
-        _wasEyesClosedDuringStation = true;
-        _consecutiveStationsWithEyesClosed++;
-        
-        // 基本点 + 連続ボーナス
-        int stationBonus = (_consecutiveStationsWithEyesClosed * CONSECUTIVE_BONUS_MULTIPLIER * STATION_BASE_SCORE).round();
-        int totalStationScore = STATION_BASE_SCORE + stationBonus;
-        
-        setState(() {
-          _score += totalStationScore;
-          _debugStatus = 'MP: 駅通過ボーナス! +$totalStationScore (_consecutiveStationsWithEyesClosed駅連続)';
-        });
-        
-        print('駅通過ボーナス: 基本点=$STATION_BASE_SCORE + 連続ボーナス=$stationBonus = $totalStationScore, 連続駅数=$_consecutiveStationsWithEyesClosed');
-      } else {
-        // 目を開けていた場合は連続カウントリセット
-        _consecutiveStationsWithEyesClosed = 0;
-        print('駅通過: 目を開けていたためボーナスなし。連続カウントリセット');
-      }
-      
-      setState(() {
-        // 駅を進める
-        if (_currentStationIndex < _stations.length - 1) {
-          // 福工大前から新宮中央に切り替わる瞬間にゲームオーバー
-          if (_currentStation == '福工大前' && _stations[_currentStationIndex + 1] == '新宮中央') {
-            _isGameOver = true;
-            _isGameStarted = false;
-            timer.cancel();
-            _showGameOver(message: '福工大前を通り過ぎ、新宮中央に到達しました！');
-          } else {
-            _currentStationIndex++;
-            _currentStation = _stations[_currentStationIndex];
-            _wasEyesClosedDuringStation = false; // 新しい駅のフラグをリセット
-          }
-        } else {
-          _isGameOver = true;
-          _isGameStarted = false;
+    await Future.delayed(Duration.zero); // イベントキュー処理
+    print('イベントキュー処理後、タイマー作成開始');
+
+    print('■■■ ゲームタイマー作成開始 ■■■');
+    // 駅切り替えタイマー作成
+    print('★★★ 駅切り替えタイマー作成開始 ★★★');
+    _stationTimer = Timer.periodic(
+      Duration(seconds: STATION_CHANGE_SECONDS),
+      (timer) {
+        print('【駅タイマー発火】isGameStarted: $_isGameStarted, isGameOver: $_isGameOver');
+        if (!_isGameStarted || _isGameOver) {
+          print('駅タイマー: 条件不一致またはゲーム終了のためキャンセル');
           timer.cancel();
-          _showGameOver(message: '終点の${_stations.last}を通り過ぎました！');
+          return;
         }
-      });
-    });
+        
+        if (mounted) {
+          setState(() {
+            if (_currentStationIndex < _stations.length - 1) {
+              _currentStationIndex++;
+              _currentStation = _stations[_currentStationIndex];
+              print('駅を更新: $_currentStation (index: $_currentStationIndex)');
+            } else {
+              _isGameOver = true;
+              _isGameStarted = false; 
+              print('終点到着、ゲームオーバー');
+              timer.cancel();
+              _showGameOver(message: '終点に到着しました');
+            }
+          });
+        } else {
+          print('駅タイマー: mountedがfalseのためsetStateスキップ');
+        }
+      }
+    );
+    print('★★★ 駅タイマー作成成功 ★★★');
+    
+    // スコア加算タイマー
+    print('◆◆◆ スコア加算タイマー作成開始 ◆◆◆');
+    _eyesClosedScoreTimer = Timer.periodic(
+      Duration(milliseconds: EYES_CLOSED_SCORE_INTERVAL),
+      (timer) {
+        if (!_isGameStarted || _isGameOver) {
+          timer.cancel();
+          return;
+        }
+        if (!_isEyesOpen) {
+          if (mounted) {
+            setState(() {
+              _score += EYES_CLOSED_SCORE_INCREMENT;
+            });
+          }
+        }
+      }
+    );
+    print('◆◆◆ スコア加算タイマー作成成功 ◆◆◆');
+    
+    if (mounted) {
+       setState(() {
+         print('ゲーム開始処理の最後にUIを強制更新。現在の目の状態: $_isEyesOpen, スコア: $_score, 駅: $_currentStation');
+         _debugStatus = kIsWeb ? _debugStatus : 'モバイルゲーム開始準備完了'; // Web以外の場合のステータス設定
+       });
+    }
+    print('■■■ ゲーム開始処理: 完了 ■■■');
   }
 
   void _addScore() {
@@ -651,7 +1035,14 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     });
   }
 
-  void _resetToTitle() {
+  Future<void> _resetToTitle() async {
+    print('タイトルに戻ります: SE停止試行開始');
+    await _stopTrainSound();
+    // ゲームオーバー・クリアSEも停止
+    await _gameOverSoundPlayer?.stop();
+    await _gameClearSoundPlayer?.stop();
+    print('タイトルに戻ります: SE停止完了');
+    
     setState(() {
       _isGameStarted = false;
       _isGameOver = false;
@@ -660,20 +1051,47 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       _currentStationIndex = 0;
       _consecutiveBlinkCount = 0;
       _wasEyesClosedDuringStation = false;
-      _consecutiveStationsWithEyesClosed = 0; // 連続駅カウントもリセット
+      _consecutiveStationsWithEyesClosed = 0;
       _wasEyesOpen = true;
       _isDebugMode = false; 
       _debugStatus = '';
       _debugFace = null;
-      _mediaPipeDebugResult = null; // MediaPipeのデバッグ結果もリセット
+      _mediaPipeDebugResult = null;
     });
+    
+    print('タイマーキャンセル開始');
     _stationTimer?.cancel();
-    _eyesClosedScoreTimer?.cancel(); // 目を閉じている間のスコア加算タイマーを停止
-    _stopWebFaceDetectionLoop(); // Web検出ループを停止
-    _stopCamera(); 
+    _eyesClosedScoreTimer?.cancel();
+    _stopWebFaceDetectionLoop();
+    _stopCamera();
+    print('タイマーキャンセル完了');
   }
 
-  void _showGameOver({String? message, bool isClear = false}) {
+  Future<void> _showGameOver({String? message, bool isClear = false}) async {
+    print('ゲームオーバー処理開始: SE停止試行');
+    // 確実にSEを停止するため、ゲーム状態も先に変更
+    setState(() {
+      _isGameStarted = false;
+      _isGameOver = true;
+    });
+    
+    _stationTimer?.cancel();
+    _stationTimer = null;
+    _eyesClosedScoreTimer?.cancel();
+    _eyesClosedScoreTimer = null;
+    
+    await _stopTrainSound();
+    print('ゲームオーバー処理: SE停止完了');
+
+    // ゲームオーバー/クリアSEの再生
+    if (isClear) {
+      _gameClearSoundPlayer?.seek(Duration.zero); // 再生位置を最初に戻す
+      _gameClearSoundPlayer?.play();
+    } else {
+      _gameOverSoundPlayer?.seek(Duration.zero); // 再生位置を最初に戻す
+      _gameOverSoundPlayer?.play();
+    }
+    
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -710,7 +1128,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
               const SizedBox(height: 16),
               Text(
                 isClear ? 'ゲームクリア！' : 'ゲームオーバー',
-                style: TextStyle(
+                style: GoogleFonts.mochiyPopOne(
                   fontSize: 30,
                   fontWeight: FontWeight.bold,
                   color: isClear ? Colors.amber[800] : Colors.redAccent,
@@ -720,7 +1138,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
               const SizedBox(height: 18),
               Text(
                 message ?? (isClear ? 'おめでとうございます！' : 'また挑戦してね！'),
-                style: const TextStyle(fontSize: 18, color: Colors.black87, height: 1.5),
+                style: GoogleFonts.mochiyPopOne(fontSize: 18, color: Colors.black87, height: 1.5),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 18),
@@ -757,12 +1175,12 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
               ),
               const SizedBox(height: 24),
               ElevatedButton.icon(
-                onPressed: () {
+                onPressed: () async {
                   Navigator.of(context).pop();
-                  _resetToTitle();
+                  await _resetToTitle();
                 },
                 icon: const Icon(Icons.home),
-                label: const Text('タイトルへ戻る'),
+                label: Text('タイトルへ戻る', style: GoogleFonts.mochiyPopOne()),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: isClear ? Colors.amber : Colors.pinkAccent,
                   foregroundColor: Colors.white,
@@ -779,55 +1197,85 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   }
 
   void _startWebFaceDetectionLoop() {
-    if (!_isMediaPipeInitialized) {
-      print('MediaPipe Face Detector not loaded yet. Skipping web detection loop.');
-      if (mounted) {
-        setState(() {
-          _debugStatus = 'MediaPipe FaceDetectorが未ロードです。';
-        });
-      }
-      return;
-    }
+    print('▶▶▶ WebFaceDetectionLoopの開始試行');
+    
+    // 既存のタイマーを停止
     _webDetectTimer?.cancel();
+    
     _webDetectTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
-      if (!kIsWeb || !_isMediaPipeInitialized || _mediaPipeFaceDetector == null) {
+      if (!kIsWeb) {
         _webDetectTimer?.cancel();
         return;
       }
-      final videoElement = html.document.getElementById('webcam-video') as html.VideoElement?;
-      if (videoElement != null && videoElement.readyState == 4 && videoElement.videoWidth! > 0 && videoElement.videoHeight! > 0) {
-        try {
-          final num frameTime = html.window.performance.now();
-          print('MP LOOP: Attempting to call detectForVideo with frameTime: $frameTime for video id: ${videoElement.id}');
-          
-          // FaceLandmarkerのdetectForVideoメソッドを正しく呼び出す
-          final result = js_util.callMethod(_mediaPipeFaceDetector, 'detectForVideo', [videoElement, frameTime]);
-          
-          // 結果を直接処理（結果がnullでない場合）
-          if (result != null) {
-            print('MP LOOP: Direct result processing');
-            _processMediaPipeResultsWeb(result);
-          } else {
-            print('MP LOOP: detectForVideo returned null result');
+      
+      // MediaPipeが未初期化の場合は初期化を試みる
+      if (!_isMediaPipeInitialized && !_isMediaPipeInitializing) {
+        print('MP LOOP: MediaPipe未初期化のため初期化を試みます');
+        _initializeMediaPipe();
+        // 初期化中は検出をスキップするが、ループ自体は継続
+        if (mounted) {
+          setState(() {
+            _debugStatus = 'MediaPipe初期化中...';
+          });
+        }
+        return;
+      }
+      
+      // 初期化中ならステータス更新のみ
+      if (_isMediaPipeInitializing) {
+        if (mounted) {
+          setState(() {
+            _debugStatus = 'MediaPipe初期化処理中...';
+          });
+        }
+        return;
+      }
+      
+      // MediaPipeが初期化完了していれば検出処理を実行
+      if (_isMediaPipeInitialized && _mediaPipeFaceDetector != null) {
+        final videoElement = html.document.getElementById('webcam-video') as html.VideoElement?;
+        if (videoElement != null && videoElement.readyState == 4 && videoElement.videoWidth! > 0 && videoElement.videoHeight! > 0) {
+          try {
+            final num frameTime = html.window.performance.now();
+            print('MP LOOP: Attempting to call detectForVideo with frameTime: $frameTime for video id: ${videoElement.id}');
+            
+            // FaceLandmarkerのdetectForVideoメソッドを正しく呼び出す
+            final result = js_util.callMethod(_mediaPipeFaceDetector, 'detectForVideo', [videoElement, frameTime]);
+            
+            // 結果を直接処理（結果がnullでない場合）
+            if (result != null) {
+              print('MP LOOP: Direct result processing');
+              _processMediaPipeResultsWeb(result);
+            } else {
+              print('MP LOOP: detectForVideo returned null result');
+            }
+            
+            print('MP LOOP: detectForVideo call completed.');
+          } catch (e, s) {
+            print('Web MediaPipe detection error in loop: $e\n$s');
+            if (mounted) {
+              setState(() {
+                _debugStatus = 'MediaPipe検出エラー: $e';
+              });
+            }
           }
-          
-          print('MP LOOP: detectForVideo call completed.');
-        } catch (e, s) {
-          print('Web MediaPipe detection error in loop: \\${e}\\n\\${s}');
-          if (mounted) {
-            setState(() {
-              _debugStatus = 'MediaPipe検出エラー: \\${e}';
-            });
-          }
+        } else {
+           if (mounted) {
+              setState(() {
+                _debugStatus = 'Video element not ready for MediaPipe detection.';
+              });
+            }
         }
       } else {
-         if (mounted) {
-            setState(() {
-              _debugStatus = 'Video element not ready for MediaPipe detection.';
-            });
-          }
+        if (mounted) {
+          setState(() {
+            _debugStatus = 'MediaPipe未初期化 (検出ループ実行中)';
+          });
+        }
       }
     });
+    
+    print('▶▶▶ WebFaceDetectionLoop開始完了');
   }
 
   void _stopWebFaceDetectionLoop() {
@@ -906,23 +1354,23 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
               children: [
                 const Icon(Icons.info_outline, color: Colors.blueAccent, size: 48),
                 const SizedBox(height: 12),
-                const Text(
+                Text(
                   '遊び方',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+                  style: GoogleFonts.mochiyPopOne(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.blueAccent),
                 ),
                 const SizedBox(height: 18),
-                _howToRow(Icons.remove_red_eye, '目を閉じると電車が進みます！'),
+                _howToRow(Icons.score, '出来るだけ長く目を閉じて眠ろう！目をつぶっている時間が長いほどスコアUP！'), // アイコンとテキスト変更
                 const SizedBox(height: 12),
-                _howToRow(Icons.star, '長く目を閉じるほどスコアUP！'),
+                _howToRow(Icons.flag, '「福工大前」駅が最終目的地だよ！'), // アイコンとテキスト変更
                 const SizedBox(height: 12),
-                _howToRow(Icons.train, '降りたい駅で「降りる！」ボタンを押そう！'),
+                _howToRow(Icons.train, '目的の駅「福工大前」で「降りる！」ボタンを押してクリア！'), // テキスト変更
                 const SizedBox(height: 12),
-                _howToRow(Icons.warning_amber, '寝過ごしや連続で目を閉じすぎるとゲームオーバー！'),
+                _howToRow(Icons.warning_amber, '寝過ごして福工大を通り過ぎたり、降りる駅を間違えるとゲームオーバー！'), // テキスト変更
                 const SizedBox(height: 24),
                 ElevatedButton.icon(
                   onPressed: () => Navigator.pop(context),
                   icon: const Icon(Icons.check),
-                  label: const Text('閉じる'),
+                  label: Text('閉じる', style: GoogleFonts.mochiyPopOne()),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent,
                     foregroundColor: Colors.white,
@@ -947,7 +1395,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(fontSize: 18, color: Colors.black87, height: 1.4),
+            style: GoogleFonts.mochiyPopOne(fontSize: 18, color: Colors.black87, height: 1.4),
           ),
         ),
       ],
@@ -956,12 +1404,29 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
 
   @override
   void dispose() {
+    print('dispose: リソース解放開始');
     WidgetsBinding.instance.removeObserver(this);
     _stationTimer?.cancel();
     _eyesClosedScoreTimer?.cancel(); // 目を閉じている間のスコア加算タイマーを停止
+    _webDetectTimer?.cancel();
     _stopCamera();
     _faceDetector.close();
     _animationController.dispose();
+    
+    // 音声プレーヤーを確実に停止して解放
+    if (_isPlayingSound) {
+      _audioPlayer?.stop();
+    }
+    _audioPlayer?.dispose();
+    _audioPlayer = null;
+    
+    // ゲームオーバー・クリアSEの解放
+    _gameOverSoundPlayer?.dispose();
+    _gameOverSoundPlayer = null;
+    _gameClearSoundPlayer?.dispose();
+    _gameClearSoundPlayer = null;
+    
+    print('dispose: リソース解放完了');
     super.dispose();
   }
 
@@ -970,34 +1435,46 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     return Scaffold(
       body: Stack(
         children: [
-          // 背景
+          // 新しいタイトル画面背景 (電車の窓風)
           Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.blue[900]!,
-                    Colors.blue[700]!,
-                  ],
-                ),
-              ),
+            child: CustomPaint(
+              painter: TitleScreenBackgroundPainter(),
             ),
           ),
-          // 電車のイラスト（背景）
-          Positioned(
-            bottom: -50,
-            left: -100,
-            child: Transform.scale(
-              scale: 1.5,
-              child: Icon(
-                Icons.train,
-                size: 300,
-                color: Colors.white.withOpacity(0.1),
-              ),
-            ),
-          ),
+          // 昇る太陽の表現は削除
+          // Positioned(
+          //   bottom: MediaQuery.of(context).size.height * 0.05, // 画面下部から少し上
+          //   left: 0,
+          //   right: 0,
+          //   child: Center(
+          //     child: Container(
+          //       width: MediaQuery.of(context).size.width * 0.8, // 幅を画面幅の80%に
+          //       height: 100, // 高さを適度に
+          //       decoration: BoxDecoration(
+          //         shape: BoxShape.circle,
+          //         gradient: RadialGradient(
+          //           colors: [
+          //             Colors.yellow.withOpacity(0.3),
+          //             Colors.orange.withOpacity(0.1),
+          //             Colors.transparent,
+          //           ],
+          //           stops: const [0.0, 0.4, 1.0],
+          //         ),
+          //       ),
+          //     ),
+          //   ),
+          // ),
+          // 電車のイラスト（背景）も一旦削除して様子見
+          // Positioned(
+          //   bottom: 10, // Y位置調整
+          //   left: 0,
+          //   right: 0,
+          //   child: Icon(
+          //     Icons.train,
+          //     size: 120,    // サイズ少し調整
+          //     color: Colors.black.withOpacity(0.04), // 色を黒ベースの透明に
+          //   ),
+          // ),
           // メインコンテンツ
           if (!_isGameStarted && !_isDebugMode)
             Center(
@@ -1019,15 +1496,13 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                     },
                     child: Column(
                       children: [
-                        const Text(
+                        Text(
                           '寝過ごしパニック',
-                          style: TextStyle(
-                            fontSize: 44,
-                            fontWeight: FontWeight.bold,
+                          style: GoogleFonts.mochiyPopOne(
+                            fontSize: 48,
                             color: Colors.white,
                             letterSpacing: 2.5,
-                            fontFamily: 'Roboto',
-                            shadows: [
+                            shadows: const [
                               Shadow(
                                 color: Colors.black38,
                                 offset: Offset(2, 2),
@@ -1039,12 +1514,10 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                         const SizedBox(height: 12),
                         Text(
                           'STAGE3',
-                          style: TextStyle(
+                          style: GoogleFonts.mochiyPopOne(
                             fontSize: 32,
-                            fontWeight: FontWeight.w900,
                             color: Colors.amber[300],
                             letterSpacing: 8,
-                            fontFamily: 'RobotoMono',
                             shadows: const [
                               Shadow(
                                 color: Colors.black54,
@@ -1069,10 +1542,11 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                             ),
                             elevation: 8,
                           ),
-                          child: const Text(
+                          child: Text(
                             'スタート',
-                            style: TextStyle(
+                            style: GoogleFonts.mochiyPopOne(
                               fontSize: 24,
+                              color: Colors.blue[900],
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -1081,7 +1555,13 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                         ElevatedButton.icon(
                           onPressed: () => _showHowToPlayDialog(context),
                           icon: const Icon(Icons.help_outline),
-                          label: const Text('遊び方'),
+                          label: Text(
+                            '遊び方',
+                            style: GoogleFonts.mochiyPopOne(
+                              fontSize: 18,
+                              color: Colors.white,
+                            ),
+                          ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blueAccent,
                             foregroundColor: Colors.white,
@@ -1106,8 +1586,9 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                           ),
                           child: Text(
                             _isDebugMode ? 'デバッグモード終了' : 'デバッグモード開始',
-                            style: const TextStyle(
+                            style: GoogleFonts.mochiyPopOne(
                               fontSize: 18,
+                              color: Colors.white,
                             ),
                           ),
                         ),
@@ -1124,19 +1605,19 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                         color: Colors.white.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(15),
                       ),
-                      child: const Column(
+                      child: Column(
                         children: [
                           Text(
-                            '寝過ごさないように気をつけろ！',
-                            style: TextStyle(
+                            'なんとか電車には乗り込めたKOU君だが既に疲れてウトウト...',
+                            style: GoogleFonts.mochiyPopOne(
                               color: Colors.white,
                               fontSize: 18,
                             ),
                           ),
-                          SizedBox(height: 10),
+                          const SizedBox(height: 10),
                           Text(
-                            '目を閉じてる時間が長いほどスコアUP！',
-                            style: TextStyle(
+                            '果たして寝過ごさずに福工大前にたどり着けるのか！？',
+                            style: GoogleFonts.mochiyPopOne(
                               color: Colors.white,
                               fontSize: 18,
                             ),
@@ -1170,92 +1651,84 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                           _mediaPipeDebugResult,
                           MediaQuery.of(context).size,
                         ),
+                        foregroundPainter: _isDebugMode ? null : FaceDistanceWarningPainter(
+                          _mediaPipeDebugResult,
+                          MediaQuery.of(context).size,
+                        ),
                       ),
                     ),
                     
                     // デバッグ情報オーバーレイ
                     Positioned(
-                      left: 20,
-                      top: 120,
                       right: 20,
+                      top: 20,
                       child: Container(
                         padding: const EdgeInsets.all(15),
+                        constraints: const BoxConstraints(maxWidth: 300),
                         decoration: BoxDecoration(
                           color: Colors.black.withOpacity(0.7),
                           borderRadius: BorderRadius.circular(15),
+                          border: Border.all(color: Colors.white.withOpacity(0.3)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'MediaPipe状態: ${_isMediaPipeInitialized ? "初期化済み" : "未初期化"}',
-                              style: const TextStyle(color: Colors.white, fontSize: 16),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'デバッグ情報: $_debugStatus',
-                              style: const TextStyle(color: Colors.white, fontSize: 16),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '目の状態: ${_isEyesOpen ? "開いています" : "閉じています"}',
-                              style: TextStyle(
-                                color: _isEyesOpen ? Colors.green : Colors.red,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
                             Row(
                               children: [
-                                Icon(
-                                  Icons.remove_red_eye,
-                                  color: _isEyesOpen ? Colors.green : Colors.red,
-                                  size: 24,
+                                Container(
+                                  width: 12,
+                                  height: 12,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: _isMediaPipeInitialized ? Colors.green : Colors.red,
+                                  ),
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  '左目: ${_getEyeStateText(true)} / 右目: ${_getEyeStateText(false)}',
-                                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                                  'MediaPipe: ${_isMediaPipeInitialized ? "初期化済み" : "未初期化"}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 14),
                                 ),
                               ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _debugStatus,
+                              style: const TextStyle(color: Colors.white, fontSize: 14),
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: _isEyesOpen ? Colors.green.withOpacity(0.3) : Colors.red.withOpacity(0.3),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '目の状態: ${_isEyesOpen ? "開いています" : "閉じています"}',
+                                style: TextStyle(
+                                  color: _isEyesOpen ? Colors.greenAccent : Colors.redAccent,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                           ],
                         ),
                       ),
                     ),
                     
-                    // デバッグモード終了ボタン
+                    // タイトルへ戻るボタン (左上に丸く浮かせる)
                     Positioned(
-                      top: 40,
-                      right: 40,
-                      child: ElevatedButton(
-                        onPressed: _toggleDebugMode,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(15),
-                          ),
+                      top: 32,
+                      left: 17,
+                      child: Material(
+                        color: Colors.white.withOpacity(0.85),
+                        shape: const CircleBorder(),
+                        elevation: 6,
+                        child: IconButton(
+                          icon: const Icon(Icons.arrow_back, color: Colors.blueAccent, size: 28),
+                          onPressed: _resetToTitle,
+                          tooltip: 'タイトルへ',
                         ),
-                        child: const Text('デバッグモード終了', style: TextStyle(fontSize: 16)),
-                      ),
-                    ),
-                    
-                    // タイトルに戻るボタン
-                    Positioned(
-                      top: 40,
-                      left: 40,
-                      child: ElevatedButton(
-                        onPressed: _resetToTitle,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(15),
-                          ),
-                        ),
-                        child: const Text('タイトルに戻る', style: TextStyle(fontSize: 16)),
                       ),
                     ),
                   ],
@@ -1351,7 +1824,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.85),
+                              color: Colors.white.withOpacity(0.5), // 透明度を 0.85 から 0.5 に変更
                               borderRadius: BorderRadius.circular(28),
                               boxShadow: [
                                 BoxShadow(
@@ -1368,12 +1841,11 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                                 const SizedBox(width: 14),
                                 Text(
                                   _currentStation,
-                                  style: const TextStyle(
+                                  style: GoogleFonts.mochiyPopOne(
                                     fontSize: 26,
-                                    fontWeight: FontWeight.bold,
                                     color: Colors.blueAccent,
                                     letterSpacing: 2,
-                                    shadows: [
+                                    shadows: const [
                                       Shadow(
                                         color: Colors.black26,
                                         offset: Offset(1, 2),
@@ -1409,11 +1881,10 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                               children: [
                                 const Icon(Icons.star, color: Colors.white, size: 24),
                                 const SizedBox(width: 8),
-                                const Text(
+                                Text(
                                   'SCORE',
-                                  style: TextStyle(
+                                  style: GoogleFonts.mochiyPopOne(
                                     fontSize: 18,
-                                    fontWeight: FontWeight.bold,
                                     color: Colors.white,
                                     letterSpacing: 1,
                                   ),
@@ -1421,9 +1892,8 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                                 const SizedBox(width: 10),
                                 Text(
                                   '$_score',
-                                  style: const TextStyle(
+                                  style: GoogleFonts.mochiyPopOne(
                                     fontSize: 22,
-                                    fontWeight: FontWeight.bold,
                                     color: Colors.white,
                                     letterSpacing: 1,
                                   ),
@@ -1454,66 +1924,32 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                         ),
                       ),
                     ),
-                    // タイトルへ戻るボタン (左上に丸く浮かせる)
-                    Positioned(
-                      top: 32,
-                      left: 17,
-                      child: Material(
-                        color: Colors.white.withOpacity(0.85),
-                        shape: const CircleBorder(),
-                        elevation: 6,
-                        child: IconButton(
-                          icon: const Icon(Icons.arrow_back, color: Colors.blueAccent, size: 28),
-                          onPressed: _resetToTitle,
-                          tooltip: 'タイトルへ',
-                        ),
-                      ),
-                    ),
-                    
-                    // デバッグモード切り替えボタン (右上に丸く浮かせる)
-                    Positioned(
-                      top: 32,
-                      right: 17,
-                      child: Material(
-                        color: _isDebugMode 
-                            ? Colors.red.withOpacity(0.85) 
-                            : Colors.grey.withOpacity(0.85),
-                        shape: const CircleBorder(),
-                        elevation: 6,
-                        child: IconButton(
-                          icon: Icon(
-                            Icons.bug_report, 
-                            color: _isDebugMode ? Colors.white : Colors.grey[700], 
-                            size: 28
-                          ),
-                          onPressed: _toggleDebugMode,
-                          tooltip: _isDebugMode ? 'デバッグモード終了' : 'デバッグモード開始',
-                        ),
-                      ),
-                    ),
-                    
                     // 降りる!ボタン（下中央に大きく）
                     Positioned(
                       bottom: MediaQuery.of(context).padding.bottom + 32,
                       left: MediaQuery.of(context).size.width * 0.5 - 100,
                       child: ElevatedButton.icon(
-                        onPressed: () {
+                        onPressed: () async {
                           if (_currentStation == '福工大前') {
                             _isGameOver = true;
                             _isGameStarted = false;
                             _stationTimer?.cancel();
-                            _showGameOver(message: 'ゲームクリア！福工大前で降りました！', isClear: true);
+                            await _showGameOver(message: 'ゲームクリア！福工大前で降りました！', isClear: true);
                           } else {
                             _isGameOver = true;
                             _isGameStarted = false;
                             _stationTimer?.cancel();
-                            _showGameOver(message: '${_currentStation}で降りてしまいました。ゲームオーバー！');
+                            await _showGameOver(message: '${_currentStation}で降りてしまいました。ゲームオーバー！');
                           }
                         },
                         icon: const Icon(Icons.directions_walk, color: Colors.white, size: 28),
-                        label: const Text(
+                        label: Text(
                           '降りる！',
-                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 2),
+                          style: GoogleFonts.mochiyPopOne(
+                            fontSize: 22,
+                            color: Colors.white,
+                            letterSpacing: 2,
+                          ),
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.orangeAccent,
@@ -1537,16 +1973,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
 
   // MediaPipeからの検出結果を処理するコールバック関数 (Web用)
   void _processMediaPipeResultsWeb(dynamic result) {
-    print('MP CALLED: _processMediaPipeResultsWeb with result type: ${result.runtimeType}');
-    print('MP RESULT KEYS: ${js_util.getProperty(result, 'constructor')?.toString() ?? 'undefined constructor'}');
-
-    // jsUtilでオブジェクトのすべてのプロパティを列挙
-    try {
-      final jsKeys = js_util.objectKeys(result);
-      print('MP RESULT KEYS: ${js_util.dartify(jsKeys)}');
-    } catch (e) {
-      print('Failed to get result keys: $e');
-    }
+    print('MP CALLED: _processMediaPipeResultsWeb with result');
     
     if (_isProcessing || (!_isGameStarted && !_isDebugMode) || _isGameOver) {
       _isProcessing = false;
@@ -1566,10 +1993,10 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       if (faceLandmarks == null || js_util.getProperty(faceLandmarks, 'length') == 0) {
         if (mounted) {
           setState(() {
-            _debugStatus = 'MP: 顔未検出 (\\${DateTime.now().second}s)';
+            _debugStatus = 'MP: 顔未検出';
             _isEyesOpen = true;
             _consecutiveBlinkCount = 0;
-            _mediaPipeDebugResult = null;
+            _mediaPipeDebugResult = result;
           });
         }
         _isProcessing = false;
@@ -1578,16 +2005,77 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
 
       // 最初の顔のランドマークを取得
       final firstFaceLandmarks = js_util.getProperty(faceLandmarks, 0);
-      print('MP firstFaceLandmarks type: ${firstFaceLandmarks.runtimeType}');
+      print('MP firstFaceLandmarks found');
       
       // ダーティファイする前にランドマークの長さを確認
       final landmarksLength = js_util.hasProperty(firstFaceLandmarks, 'length') 
           ? js_util.getProperty(firstFaceLandmarks, 'length') 
           : 'unknown';
-      print('MP landmarks length before dartify: $landmarksLength');
+      print('MP landmarks length: $landmarksLength');
       
-      final landmarks = js_util.dartify(firstFaceLandmarks) as List<dynamic>;
-      print('MP landmarks dartified length: ${landmarks.length}');
+      List<dynamic> landmarks;
+      try {
+        landmarks = js_util.dartify(firstFaceLandmarks) as List<dynamic>;
+        print('MP landmarks dartified length: ${landmarks.length}');
+      } catch (e) {
+        print('Failed to dartify landmarks: $e');
+        // ランドマークの変換に失敗した場合は代替手段を試す
+        landmarks = [];
+        final length = js_util.getProperty(firstFaceLandmarks, 'length') as int? ?? 0;
+        for (int i = 0; i < length; i++) {
+          try {
+            final point = js_util.getProperty(firstFaceLandmarks, i);
+            final x = js_util.getProperty(point, 'x');
+            final y = js_util.getProperty(point, 'y');
+            final z = js_util.getProperty(point, 'z');
+            landmarks.add({
+              'x': x is num ? x.toDouble() : 0.0,
+              'y': y is num ? y.toDouble() : 0.0,
+              'z': z is num ? z.toDouble() : 0.0,
+            });
+          } catch (e) {
+            print('Landmark $i conversion error: $e');
+          }
+        }
+      }
+      
+      // 目の状態をblendshapesから検出する方法を試みる
+      bool eyesOpenFromBlendshapes = true;
+      if (faceBlendshapes != null && js_util.getProperty(faceBlendshapes, 'length') > 0) {
+        try {
+          final firstBlendshapes = js_util.getProperty(faceBlendshapes, 0);
+          final categories = js_util.getProperty(firstBlendshapes, 'categories');
+          
+          // 目を閉じる表情を探す (eyeBlinkLeft, eyeBlinkRight)
+          double leftEyeClosedScore = 0.0;
+          double rightEyeClosedScore = 0.0;
+          
+          if (categories != null) {
+            final length = js_util.getProperty(categories, 'length') as int? ?? 0;
+            for (int i = 0; i < length; i++) {
+              final category = js_util.getProperty(categories, i);
+              final name = js_util.getProperty(category, 'categoryName') as String?;
+              final score = js_util.getProperty(category, 'score') as num?;
+              
+              if (name == 'eyeBlinkLeft' && score != null) {
+                leftEyeClosedScore = score.toDouble();
+              } else if (name == 'eyeBlinkRight' && score != null) {
+                rightEyeClosedScore = score.toDouble();
+              }
+            }
+          }
+          
+          // スコアが閾値を超えたら目を閉じていると判断
+          final blendshapeThreshold = 0.35; // 0.3から0.35に変更 (判定を少し厳しく)
+          final leftEyeClosed = leftEyeClosedScore > blendshapeThreshold;
+          final rightEyeClosed = rightEyeClosedScore > blendshapeThreshold;
+          eyesOpenFromBlendshapes = !(leftEyeClosed && rightEyeClosed);
+          
+          print('Blendshapes: Left eye closed: $leftEyeClosedScore, Right eye closed: $rightEyeClosedScore');
+        } catch (e) {
+          print('Blendshapes 処理エラー: $e');
+        }
+      }
       
       // 目のランドマークのインデックス（MediaPipe Face Landmarker）
       // 左目の上下のランドマークは約159（上）と145（下）
@@ -1601,72 +2089,81 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       bool rightEyeOpen = true;
       
       if (landmarks.length > rightEyeUpperIndex) {
-        // 左目の開閉判定
-        print('左目ランドマーク型: ${landmarks[leftEyeUpperIndex].runtimeType}');
+        try {
+          // 左目の開閉判定
+          final leftEyeUpper = landmarks[leftEyeUpperIndex] as Map;
+          final leftEyeLower = landmarks[leftEyeLowerIndex] as Map;
+          
+          // yプロパティの取得
+          final leftEyeUpperY = leftEyeUpper['y'] is num ? (leftEyeUpper['y'] as num).toDouble() : 0.0;
+          final leftEyeLowerY = leftEyeLower['y'] is num ? (leftEyeLower['y'] as num).toDouble() : 0.0;
+          final leftEyeDistance = (leftEyeUpperY - leftEyeLowerY).abs();
+          
+          // 右目の開閉判定
+          final rightEyeUpper = landmarks[rightEyeUpperIndex] as Map;
+          final rightEyeLower = landmarks[rightEyeLowerIndex] as Map;
+          final rightEyeUpperY = rightEyeUpper['y'] is num ? (rightEyeUpper['y'] as num).toDouble() : 0.0;
+          final rightEyeLowerY = rightEyeLower['y'] is num ? (rightEyeLower['y'] as num).toDouble() : 0.0;
+          final rightEyeDistance = (rightEyeUpperY - rightEyeLowerY).abs();
+          
+          // しきい値以下なら目を閉じていると判定
+          const eyeClosedThreshold = 0.005; // 0.006から0.005に変更 (開いている判定を少し厳しく)
+          leftEyeOpen = leftEyeDistance > eyeClosedThreshold;
+          rightEyeOpen = rightEyeDistance > eyeClosedThreshold;
+          
+          print('目の開閉状態 - 左: $leftEyeOpen (距離: ${leftEyeDistance.toStringAsFixed(4)}), 右: $rightEyeOpen (距離: ${rightEyeDistance.toStringAsFixed(4)})');
+          
+          // ランドマークとblendshapesの両方から判定
+          final newEyesOpenState = (leftEyeOpen || rightEyeOpen) && eyesOpenFromBlendshapes;
+          print('最終判定: ${newEyesOpenState ? "目を開いている" : "目を閉じている"} (ランドマーク & ブレンドシェイプ結合)');
         
-        // キャストを修正し、より一般的なMap型として扱う
-        final leftEyeUpper = landmarks[leftEyeUpperIndex] as Map;
-        final leftEyeLower = landmarks[leftEyeLowerIndex] as Map;
-        
-        // yプロパティの取得も安全に行う
-        final leftEyeUpperY = leftEyeUpper['y'] is num ? (leftEyeUpper['y'] as num).toDouble() : 0.0;
-        final leftEyeLowerY = leftEyeLower['y'] is num ? (leftEyeLower['y'] as num).toDouble() : 0.0;
-        final leftEyeDistance = (leftEyeUpperY - leftEyeLowerY).abs();
-        
-        // 右目の開閉判定
-        final rightEyeUpper = landmarks[rightEyeUpperIndex] as Map;
-        final rightEyeLower = landmarks[rightEyeLowerIndex] as Map;
-        final rightEyeUpperY = rightEyeUpper['y'] is num ? (rightEyeUpper['y'] as num).toDouble() : 0.0;
-        final rightEyeLowerY = rightEyeLower['y'] is num ? (rightEyeLower['y'] as num).toDouble() : 0.0;
-        final rightEyeDistance = (rightEyeUpperY - rightEyeLowerY).abs();
-        
-        // しきい値以下なら目を閉じていると判定
-        const eyeClosedThreshold = 0.004; // しきい値をさらに下げる（目を閉じている判定をより緩める）
-        leftEyeOpen = leftEyeDistance > eyeClosedThreshold;
-        rightEyeOpen = rightEyeDistance > eyeClosedThreshold;
-        
-        final newEyesOpenState = leftEyeOpen || rightEyeOpen;
-        _debugStatus = 'MP: 顔検出 L: \\${leftEyeDistance.toStringAsFixed(4)} R: \\${rightEyeDistance.toStringAsFixed(4)}';
-        
-        if (mounted) {
-          setState(() {
-            // 目の状態が変わった場合のみログを出力
-            if (_isEyesOpen != newEyesOpenState) {
-              print('目の状態が変更: ${_isEyesOpen ? "開" : "閉"} → ${newEyesOpenState ? "開" : "閉"}');
-            }
-            
-            _isEyesOpen = newEyesOpenState;
-            
-            // 目を閉じた場合は駅通過フラグを立てる
-            if (!newEyesOpenState) {
-              _wasEyesClosedDuringStation = true;
-              print('目を閉じています: スコア継続加算対象');
-            }
-            
-            // まばたき検出は一時的に保持
-            if (_wasEyesOpen && !newEyesOpenState) {
-              _addScore(); // まばたき連続カウント用
-              print('MP: まばたき検出');
-            }
-            _wasEyesOpen = newEyesOpenState;
-            
-            if (newEyesOpenState) {
-              _consecutiveBlinkCount = 0;
-            }
-            _mediaPipeDebugResult = result;
-          });
+          _debugStatus = 'MP: 顔検出 左目: ${leftEyeOpen ? "開" : "閉"} 右目: ${rightEyeOpen ? "開" : "閉"}';
+          
+          if (mounted) {
+            setState(() {
+              // 目の状態更新
+              _isEyesOpen = newEyesOpenState;
+              
+              // 目を閉じた場合は駅通過フラグを立てる
+              if (!newEyesOpenState) {
+                _wasEyesClosedDuringStation = true;
+                print('目を閉じています: スコア継続加算対象');
+              }
+              
+              // まばたき検出
+              if (_wasEyesOpen && !newEyesOpenState) {
+                _addScore(); // まばたき連続カウント用
+                print('MP: まばたき検出');
+              }
+              _wasEyesOpen = newEyesOpenState;
+              
+              if (newEyesOpenState) {
+                _consecutiveBlinkCount = 0;
+              }
+              _mediaPipeDebugResult = result;
+            });
+          }
+        } catch (e) {
+          print('目の開閉判定エラー: $e');
+          if (mounted) {
+            setState(() {
+              _debugStatus = 'MP解析エラー: $e';
+              _mediaPipeDebugResult = result;
+            });
+          }
         }
       } else {
         if (mounted) {
           setState(() {
-            _debugStatus = 'MP: ランドマーク不足 (\\${landmarks.length})';
+            _debugStatus = 'MP: ランドマーク不足 (${landmarks.length})';
             _isEyesOpen = true;
+            _mediaPipeDebugResult = result;
           });
         }
       }
     } catch (e, s) {
-      print('MediaPipe結果処理エラー: \\${e}\\n\\${s}');
-      if (mounted) setState(() => _debugStatus = 'MP結果処理エラー: \\${e}');
+      print('MediaPipe結果処理エラー: $e\n$s');
+      if (mounted) setState(() => _debugStatus = 'MP結果処理エラー: $e');
     } finally {
       _isProcessing = false;
     }
@@ -1674,28 +2171,46 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
 
   // 目を閉じている間定期的にスコアを加算するタイマー
   void _startEyesClosedScoreTimer() {
-    _eyesClosedScoreTimer?.cancel();
-    print('新しい目を閉じているスコア加算タイマーを作成 (${EYES_CLOSED_SCORE_INTERVAL}ms間隔)');
+    print('◆◆◆ スコア加算タイマー初期化開始 ◆◆◆');
+
+    // 既存のタイマーを確実にキャンセル
+    if (_eyesClosedScoreTimer != null) {
+      print('既存のスコア加算タイマーをキャンセルします');
+      _eyesClosedScoreTimer?.cancel();
+      _eyesClosedScoreTimer = null;
+    }
     
-    _eyesClosedScoreTimer = Timer.periodic(Duration(milliseconds: EYES_CLOSED_SCORE_INTERVAL), (timer) {
-      if (!_isGameStarted || _isGameOver) {
-        print('ゲーム状態が無効なため、スコア加算タイマーを停止します。');
-        timer.cancel();
-        return;
-      }
-      
-      // 目を閉じている間はスコアを継続的に加算
-      if (!_isEyesOpen) {
-        setState(() {
-          _score += EYES_CLOSED_SCORE_INCREMENT;
-          print('目を閉じている間のスコア加算: +$EYES_CLOSED_SCORE_INCREMENT, 現在のスコア: $_score, 目の状態: ${_isEyesOpen ? "開" : "閉"}');
-        });
-      } else {
-        print('目が開いているため、スコア加算なし（_isEyesOpen: $_isEyesOpen）');
-      }
-    });
+    print('スコア加算タイマー作成: 間隔=${EYES_CLOSED_SCORE_INTERVAL}ms');
     
-    print('目を閉じているスコア加算タイマー作成完了');
+    try {
+      _eyesClosedScoreTimer = Timer.periodic(
+        Duration(milliseconds: EYES_CLOSED_SCORE_INTERVAL), 
+        (timer) {
+          print('【スコア加算タイマー発火】: 時刻=${DateTime.now().toIso8601String()}');
+          print('現在の状態: ゲーム状態=${_isGameStarted}, ゲームオーバー=${_isGameOver}, 目=${_isEyesOpen ? "開" : "閉"}, スコア=$_score');
+          
+          if (!_isGameStarted || _isGameOver) {
+            print('スコア加算タイマー: ゲーム終了のためタイマー停止');
+            timer.cancel();
+            return;
+          }
+          
+          // 目を閉じている場合のみスコア加算
+          if (!_isEyesOpen) {
+            final oldScore = _score;
+            setState(() {
+              _score += EYES_CLOSED_SCORE_INCREMENT;
+            });
+            print('スコア加算完了: $oldScore → $_score (+$EYES_CLOSED_SCORE_INCREMENT)');
+          } else {
+            print('目が開いているためスコア加算なし');
+          }
+        }
+      );
+      print('◆◆◆ スコア加算タイマー作成成功 ◆◆◆');
+    } catch (e) {
+      print('!!! スコア加算タイマー作成エラー: $e !!!');
+    }
   }
 
   String _getEyeStateText(bool isLeft) {
@@ -1738,6 +2253,61 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       return '${isOpen ? "開" : "閉"} (${eyeDistance.toStringAsFixed(4)})';
     } catch (e) {
       return 'エラー: $e';
+    }
+  }
+
+  Future<void> _initializeAudio() async {
+    _audioPlayer = AudioPlayer();
+    await _audioPlayer?.setAsset('assets/sounds/train_sound.mp3');
+    await _audioPlayer?.setLoopMode(LoopMode.all);
+
+    // ゲームオーバー・クリアSEの初期化
+    _gameOverSoundPlayer = AudioPlayer();
+    await _gameOverSoundPlayer?.setAsset('assets/sounds/game_over.mp3'); 
+    // ループ再生はしないので LoopMode.off (デフォルト)
+
+    _gameClearSoundPlayer = AudioPlayer();
+    await _gameClearSoundPlayer?.setAsset('assets/sounds/game_clear.mp3');
+    // ループ再生はしないので LoopMode.off (デフォルト)
+  }
+
+  Future<void> _playTrainSound() async {
+    print('SE再生試行: isPlayingSound=$_isPlayingSound, audioPlayer is null: ${_audioPlayer == null}');
+    if (!_isPlayingSound && _audioPlayer != null) {
+      try {
+        print('calling _audioPlayer.play()');
+        _audioPlayer?.play(); // await を一時的に削除して、処理がブロックされないか確認
+        print('_audioPlayer.play() called (no await)');
+        // setStateは非同期処理の結果を待たずにすぐに実行される
+        if (mounted) {
+          setState(() {
+            _isPlayingSound = true;
+          });
+        }
+      } catch (e) {
+        print('Audio play error: $e');
+      }
+    } else {
+      print('SE再生スキップ: 既に再生中かオーディオプレーヤーがnull');
+    }
+  }
+
+  Future<void> _stopTrainSound() async {
+    print('SE停止試行: 現在の再生状態=${_isPlayingSound}');
+    if (_audioPlayer != null) {
+      try {
+        // 現在の再生状態に関わらず停止を試みる
+        await _audioPlayer?.stop();
+        print('SE停止成功');
+      } catch (e) {
+        print('SE停止エラー: $e');
+      } finally {
+        setState(() {
+          _isPlayingSound = false;
+        });
+      }
+    } else {
+      print('SE停止: オーディオプレーヤーが未初期化');
     }
   }
 }

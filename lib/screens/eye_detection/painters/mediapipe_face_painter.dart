@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:js_util' as js_util;
 
+// 顔の距離状態を表す列挙型
+enum FaceDistance { tooClose, tooFar, good }
+
 /// MediaPipeの顔ランドマークを描画するためのカスタムペインター
 class MediaPipeFacePainter extends CustomPainter {
   final dynamic mediaPipeResult;
@@ -80,6 +83,9 @@ class MediaPipeFacePainter extends CustomPainter {
       bool isLeftEyeOpen = _isEyeOpen(landmarks, true);
       bool isRightEyeOpen = _isEyeOpen(landmarks, false);
 
+      // 顔の距離を判定
+      FaceDistance faceDistance = _checkFaceDistance(landmarks);
+
       // 目の状態を表示するテキスト描画
       final textStyle = TextStyle(
         color: Colors.white,
@@ -94,6 +100,33 @@ class MediaPipeFacePainter extends CustomPainter {
         ],
       );
 
+      // 顔の距離に関する警告メッセージを表示
+      if (faceDistance != FaceDistance.good) {
+        final warningText = faceDistance == FaceDistance.tooClose
+            ? '顔が近すぎます'
+            : '顔が遠すぎます';
+        final warningColor = Colors.orange;
+        
+        final warningTextPainter = TextPainter(
+          text: TextSpan(
+            text: '⚠️ $warningText',
+            style: textStyle.copyWith(
+              color: warningColor,
+              fontSize: 24,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+        warningTextPainter.layout();
+        warningTextPainter.paint(
+          canvas,
+          Offset(
+            (size.width - warningTextPainter.width) / 2,
+            size.height * 0.2,
+          ),
+        );
+      }
+
       final leftEyeTextPainter = TextPainter(
         text: TextSpan(
           text: isLeftEyeOpen ? "左目: 開" : "左目: 閉",
@@ -104,7 +137,7 @@ class MediaPipeFacePainter extends CustomPainter {
         textDirection: TextDirection.ltr,
       );
       leftEyeTextPainter.layout();
-      leftEyeTextPainter.paint(canvas, Offset(20, size.height - 100));
+      leftEyeTextPainter.paint(canvas, Offset(20, size.height - 60));
 
       final rightEyeTextPainter = TextPainter(
         text: TextSpan(
@@ -116,7 +149,7 @@ class MediaPipeFacePainter extends CustomPainter {
         textDirection: TextDirection.ltr,
       );
       rightEyeTextPainter.layout();
-      rightEyeTextPainter.paint(canvas, Offset(20, size.height - 70));
+      rightEyeTextPainter.paint(canvas, Offset(20, size.height - 30));
 
     } catch (e) {
       print('MediaPipeFacePainter描画エラー: $e');
@@ -149,6 +182,36 @@ class MediaPipeFacePainter extends CustomPainter {
     // しきい値
     const eyeClosedThreshold = 0.004;
     return eyeDistance > eyeClosedThreshold;
+  }
+
+  // 顔の距離を判定する関数
+  FaceDistance _checkFaceDistance(List<dynamic> landmarks) {
+    // 顔の大きさを計算するために使用するランドマーク
+    const int foreheadIndex = 10;  // 額
+    const int chinIndex = 152;     // あご
+    
+    if (landmarks.length <= foreheadIndex || landmarks.length <= chinIndex) {
+      return FaceDistance.good;
+    }
+    
+    final forehead = landmarks[foreheadIndex] as Map;
+    final chin = landmarks[chinIndex] as Map;
+    
+    // 顔の縦の長さを計算
+    final foreheadY = forehead['y'] is num ? (forehead['y'] as num).toDouble() : 0.0;
+    final chinY = chin['y'] is num ? (chin['y'] as num).toDouble() : 0.0;
+    final faceHeight = (chinY - foreheadY).abs();
+    
+    // 画面に対する顔の大きさの比率で判定
+    const double tooCloseThreshold = 0.5;    // 画面の50%以上を占める場合は近すぎる
+    const double tooFarThreshold = 0.25;     // 画面の25%未満の場合は遠すぎる
+    
+    if (faceHeight > tooCloseThreshold) {
+      return FaceDistance.tooClose;
+    } else if (faceHeight < tooFarThreshold) {
+      return FaceDistance.tooFar;
+    }
+    return FaceDistance.good;
   }
 
   @override

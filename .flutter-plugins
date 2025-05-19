@@ -1,4 +1,5 @@
 # This is a generated file; do not edit or check into version control.
+audio_session=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\audio_session-0.1.25\\
 camera=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\camera-0.10.6\\
 camera_android=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\camera_android-0.10.10+3\\
 camera_avfoundation=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\camera_avfoundation-0.9.19\\
@@ -6,6 +7,8 @@ camera_web=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\camera
 flutter_plugin_android_lifecycle=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\flutter_plugin_android_lifecycle-2.0.28\\
 google_mlkit_commons=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\google_mlkit_commons-0.6.1\\
 google_mlkit_face_detection=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\google_mlkit_face_detection-0.9.0\\
+just_audio=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\just_audio-0.9.46\\
+just_audio_web=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\just_audio_web-0.4.16\\
 path_provider=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\path_provider-2.1.5\\
 path_provider_android=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\path_provider_android-2.2.17\\
 path_provider_foundation=C:\\Users\\gomaa\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\path_provider_foundation-2.4.1\\
