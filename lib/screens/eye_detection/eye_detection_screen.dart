@@ -719,6 +719,9 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   AudioPlayer? _gameOverSoundPlayer;
   AudioPlayer? _gameClearSoundPlayer;
 
+  // 画面サイズに基づいて小さい画面かどうかを判定
+  bool get isSmallScreen => MediaQuery.of(context).size.width < 600;
+
   @override
   void initState() {
     super.initState();
@@ -1545,13 +1548,12 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                   decoration: BoxDecoration(
                     color: Colors.orange.withOpacity(0.3),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.orange.withOpacity(0.6)),
                   ),
                   child: Text(
                     'フリープレイモード',
                     style: GoogleFonts.mochiyPopOne(
-                      fontSize: 16,
-                      color: Colors.deepOrange,
+                      fontSize: isSmallScreen ? 12 : 14,
+                      color: Colors.white70,
                     ),
                   ),
                 ),
@@ -1842,121 +1844,90 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
 
   @override
   Widget build(BuildContext context) {
+    // 画面サイズを取得
+    final screenSize = MediaQuery.of(context).size;
+    final isSmallScreen = screenSize.height < 600;
+
     return Scaffold(
-      body: Stack(
-        children: [
-          // 新しいタイトル画面背景 (電車の窓風) - ランダムな背景タイプを使用
-          Positioned.fill(
-            child: CustomPaint(
-              painter: TitleScreenBackgroundPainter(
-                backgroundType: _currentBackgroundType,
+      // オーバーフローを防止するレイアウト
+      body: SafeArea(
+        child: Stack(
+          children: [
+            // 背景 - これは常に表示
+            Positioned.fill(
+              child: CustomPaint(
+                painter: TitleScreenBackgroundPainter(
+                  backgroundType: _currentBackgroundType,
+                ),
               ),
             ),
-          ),
-          // 昇る太陽の表現は削除
-          // Positioned(
-          //   bottom: MediaQuery.of(context).size.height * 0.05, // 画面下部から少し上
-          //   left: 0,
-          //   right: 0,
-          //   child: Center(
-          //     child: Container(
-          //       width: MediaQuery.of(context).size.width * 0.8, // 幅を画面幅の80%に
-          //       height: 100, // 高さを適度に
-          //       decoration: BoxDecoration(
-          //         shape: BoxShape.circle,
-          //         gradient: RadialGradient(
-          //           colors: [
-          //             Colors.yellow.withOpacity(0.3),
-          //             Colors.orange.withOpacity(0.1),
-          //             Colors.transparent,
-          //           ],
-          //           stops: const [0.0, 0.4, 1.0],
-          //         ),
-          //       ),
-          //     ),
-          //   ),
-          // ),
-          // 電車のイラスト（背景）も一旦削除して様子見
-          // Positioned(
-          //   bottom: 10, // Y位置調整
-          //   left: 0,
-          //   right: 0,
-          //   child: Icon(
-          //     Icons.train,
-          //     size: 120,    // サイズ少し調整
-          //     color: Colors.black.withOpacity(0.04), // 色を黒ベースの透明に
-          //   ),
-          // ),
-          // メインコンテンツ
-          if (!_isGameStarted && !_isDebugMode)
-            Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // タイトルアニメーション
-                  TweenAnimationBuilder<double>(
-                    tween: Tween(begin: 0.0, end: 1.0),
-                    duration: const Duration(seconds: 1),
-                    builder: (context, value, child) {
-                      return Transform.scale(
-                        scale: value,
-                        child: Opacity(
-                          opacity: value,
-                          child: child,
+            
+            // タイトル画面
+            if (!_isGameStarted && !_isDebugMode) 
+              Positioned.fill(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // 上部スペース
+                      SizedBox(height: isSmallScreen ? 20 : screenSize.height * 0.05),
+                      
+                      // タイトルとメインコンテンツ
+                      Text(
+                        '寝過ごしパニック',
+                        style: GoogleFonts.mochiyPopOne(
+                          fontSize: isSmallScreen ? 36 : 42, // フォントサイズを大きく
+                          color: Colors.white,
+                          letterSpacing: 2.0,
+                          shadows: const [
+                            Shadow(
+                              color: Colors.black38,
+                              offset: Offset(2, 2),
+                              blurRadius: 6,
+                            ),
+                          ],
                         ),
-                      );
-                    },
-                    child: Column(
-                      children: [
-                        Text(
-                          '寝過ごしパニック',
-                          style: GoogleFonts.mochiyPopOne(
-                            fontSize: 48,
-                            color: Colors.white,
-                            letterSpacing: 2.5,
-                            shadows: const [
-                              Shadow(
-                                color: Colors.black38,
-                                offset: Offset(2, 2),
-                                blurRadius: 6,
-                              ),
-                            ],
-                          ),
+                        textAlign: TextAlign.center,
+                      ),
+                      
+                      // 背景タイプ表示
+                      Container(
+                        margin: const EdgeInsets.only(top: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(24),
                         ),
-                        const SizedBox(height: 12),
-                        // 現在の背景タイプを表示
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.3),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _currentBackgroundType.icon,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _currentBackgroundType.icon,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _currentBackgroundType.name,
+                              style: GoogleFonts.mochiyPopOne(
+                                fontSize: isSmallScreen ? 16 : 18,
                                 color: Colors.white,
-                                size: 24,
                               ),
-                              const SizedBox(width: 8),
-                              Text(
-                                _currentBackgroundType.name,
-                                style: GoogleFonts.mochiyPopOne(
-                                  fontSize: 18,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 12),
-                        Text(
+                      ),
+                      
+                      // ステージ表示
+                      Padding(
+                        padding: EdgeInsets.only(top: 12, bottom: isSmallScreen ? 20 : 24),
+                        child: Text(
                           'STAGE3',
                           style: GoogleFonts.mochiyPopOne(
-                            fontSize: 32,
+                            fontSize: isSmallScreen ? 28 : 32,
                             color: Colors.amber[300],
-                            letterSpacing: 8,
+                            letterSpacing: 6,
                             shadows: const [
                               Shadow(
                                 color: Colors.black54,
@@ -1966,511 +1937,518 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                             ],
                           ),
                         ),
-                        const SizedBox(height: 40),
-                        ElevatedButton(
+                      ),
+                      
+                      // スタートボタン
+                      Container(
+                        width: isSmallScreen ? 240 : 280, // 幅を固定
+                        height: isSmallScreen ? 60 : 70, // 高さを固定
+                        margin: const EdgeInsets.only(bottom: 16),
+                        child: ElevatedButton(
                           onPressed: _isGameStarted ? null : _startGame,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.white,
                             foregroundColor: Colors.blue[900],
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 40,
-                              vertical: 20,
-                            ),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
+                              borderRadius: BorderRadius.circular(35),
                             ),
                             elevation: 8,
+                            shadowColor: Colors.black38,
                           ),
                           child: Text(
                             'スタート',
                             style: GoogleFonts.mochiyPopOne(
-                              fontSize: 24,
+                              fontSize: isSmallScreen ? 24 : 28,
                               color: Colors.blue[900],
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
-                        // フリープレイモードの表示
-                        if (widget.gameService.isFreePlay)
-                          Container(
-                            margin: const EdgeInsets.only(top: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.8),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              'フリープレイモード',
-                              style: GoogleFonts.mochiyPopOne(
-                                fontSize: 14,
-                                color: Colors.white,
-                              ),
+                      ),
+                      
+                      // フリープレイモードの表示
+                      if (widget.gameService.isFreePlay)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withOpacity(0.8),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            'フリープレイモード',
+                            style: GoogleFonts.mochiyPopOne(
+                              fontSize: isSmallScreen ? 14 : 16,
+                              color: Colors.white,
                             ),
                           ),
-                        const SizedBox(height: 20),
-                        Row(
+                        ),
+                      
+                      // 操作ボタン
+                      Padding(
+                        padding: EdgeInsets.symmetric(vertical: isSmallScreen ? 16 : 20),
+                        child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            ElevatedButton.icon(
+                            _buildActionButton(
                               onPressed: () => _showHowToPlayDialog(context),
-                              icon: const Icon(Icons.help_outline),
-                              label: Text(
-                                '遊び方',
-                                style: GoogleFonts.mochiyPopOne(
-                                  fontSize: 18,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blueAccent,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                                elevation: 6,
-                              ),
+                              icon: Icons.help_outline,
+                              label: '遊び方',
+                              color: Colors.blueAccent,
+                              isSmallScreen: isSmallScreen,
                             ),
                             const SizedBox(width: 16),
-                            ElevatedButton.icon(
+                            _buildActionButton(
                               onPressed: _resetBackground,
-                              icon: const Icon(Icons.landscape),
-                              label: Text(
-                                '背景変更',
-                                style: GoogleFonts.mochiyPopOne(
-                                  fontSize: 18,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.teal,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                                elevation: 6,
-                              ),
+                              icon: Icons.landscape,
+                              label: '背景変更',
+                              color: Colors.teal,
+                              isSmallScreen: isSmallScreen,
                             ),
                           ],
                         ),
-                        const SizedBox(height: 20),
-                        Row(
+                      ),
+                      
+                      // デバッグとフリープレイボタン
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 20),
+                        child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            ElevatedButton(
+                            _buildActionButton(
                               onPressed: _toggleDebugMode,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _isDebugMode ? Colors.red : Colors.grey[700],
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 30,
-                                  vertical: 15,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                              ),
-                              child: Text(
-                                _isDebugMode ? 'デバッグモード終了' : 'デバッグモード開始',
-                                style: GoogleFonts.mochiyPopOne(
-                                  fontSize: 18,
-                                  color: Colors.white,
-                                ),
-                              ),
+                              icon: Icons.bug_report,
+                              label: _isDebugMode ? 'デバッグ終了' : 'デバッグ開始',
+                              color: _isDebugMode ? Colors.red : Colors.grey[700]!,
+                              isSmallScreen: isSmallScreen,
+                              width: isSmallScreen ? 140 : 160,
                             ),
                             const SizedBox(width: 16),
-                            ElevatedButton.icon(
+                            _buildActionButton(
                               onPressed: !widget.gameService.isFreePlay ? _toggleFreePlayMode : null,
-                              icon: const Icon(Icons.videogame_asset),
-                              label: Text(
-                                'フリープレイモード',
+                              icon: Icons.videogame_asset,
+                              label: 'フリープレイ',
+                              color: widget.gameService.isFreePlay ? Colors.grey : Colors.orange,
+                              isSmallScreen: isSmallScreen,
+                              width: isSmallScreen ? 140 : 160,
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      // ゲーム説明テキスト
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(24, isSmallScreen ? 8 : 16, 24, isSmallScreen ? 24 : 32),
+                        child: Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.1),
+                              width: 1,
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Text(
+                                'なんとか電車には乗り込めたKOU君だが既に疲れてウトウト...',
                                 style: GoogleFonts.mochiyPopOne(
-                                  fontSize: 18,
                                   color: Colors.white,
+                                  fontSize: isSmallScreen ? 14 : 16,
+                                  height: 1.5,
                                 ),
+                                textAlign: TextAlign.center,
                               ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: widget.gameService.isFreePlay ? Colors.grey : Colors.orange,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                elevation: 6,
+                              SizedBox(height: isSmallScreen ? 8 : 12),
+                              Text(
+                                '果たして寝過ごさずに福工大前にたどり着けるのか！？',
+                                style: GoogleFonts.mochiyPopOne(
+                                  color: Colors.white,
+                                  fontSize: isSmallScreen ? 14 : 16,
+                                  height: 1.5,
+                                ),
+                                textAlign: TextAlign.center,
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 40),
-                  AnimatedOpacity(
-                    opacity: _isGameStarted ? 0.0 : 1.0,
-                    duration: const Duration(milliseconds: 500),
-                    child: Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            'なんとか電車には乗り込めたKOU君だが既に疲れてウトウト...',
-                            style: GoogleFonts.mochiyPopOne(
-                              color: Colors.white,
-                              fontSize: 18,
-                            ),
+                            ],
                           ),
-                          const SizedBox(height: 10),
-                          Text(
-                            '果たして寝過ごさずに福工大前にたどり着けるのか！？',
-                            style: GoogleFonts.mochiyPopOne(
-                              color: Colors.white,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          // デバッグモード時のカメラプレビュー
-          if (_isDebugMode)
-            if (kIsWeb)
-              Positioned.fill(
-                child: Stack(
-                  children: [
-                    // カメラビューは透明なHtmlElementViewで配置
-                    Positioned.fill(
-                      child: Container(
-                        color: Colors.transparent, // 背景を透明に
-                        child: HtmlElementView(viewType: 'webcam-video'),
-                      ),
-                    ),
-                    
-                    // 顔のランドマークを表示するオーバーレイ
-                    if (_mediaPipeDebugResult != null)
-                    Positioned.fill(
-                      child: CustomPaint(
-                        painter: MediaPipeFacePainter(
-                          _mediaPipeDebugResult,
-                          MediaQuery.of(context).size,
-                        ),
-                        foregroundPainter: _isDebugMode ? null : FaceDistanceWarningPainter(
-                          _mediaPipeDebugResult,
-                          MediaQuery.of(context).size,
-                        ),
-                      ),
-                    ),
-                    
-                    // デバッグ情報オーバーレイ
-                    Positioned(
-                      right: 20,
-                      top: 20,
-                      child: Container(
-                        padding: const EdgeInsets.all(15),
-                        constraints: const BoxConstraints(maxWidth: 300),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.7),
-                          borderRadius: BorderRadius.circular(15),
-                          border: Border.all(color: Colors.white.withOpacity(0.3)),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  width: 12,
-                                  height: 12,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: _isMediaPipeInitialized ? Colors.green : Colors.red,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'MediaPipe: ${_isMediaPipeInitialized ? "初期化済み" : "未初期化"}',
-                                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _debugStatus,
-                              style: const TextStyle(color: Colors.white, fontSize: 14),
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: _isEyesOpen ? Colors.green.withOpacity(0.3) : Colors.red.withOpacity(0.3),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                '目の状態: ${_isEyesOpen ? "開いています" : "閉じています"}',
-                                style: TextStyle(
-                                  color: _isEyesOpen ? Colors.greenAccent : Colors.redAccent,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    
-                    // タイトルへ戻るボタン (左上に丸く浮かせる)
-                    Positioned(
-                      top: 32,
-                      left: 17,
-                      child: Material(
-                        color: Colors.white.withOpacity(0.85),
-                        shape: const CircleBorder(),
-                        elevation: 6,
-                        child: IconButton(
-                          icon: const Icon(Icons.arrow_back, color: Colors.blueAccent, size: 28),
-                          onPressed: _resetToTitle,
-                          tooltip: 'タイトルへ',
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else if (_controller != null && _controller!.value.isInitialized)
-              Positioned.fill(
-                child: Builder(
-                  builder: (context) {
-                    Size adjustedPreviewSize = _controller!.value.previewSize!;
-                    if (MediaQuery.of(context).orientation == Orientation.portrait && adjustedPreviewSize.width > adjustedPreviewSize.height) {
-                      adjustedPreviewSize = Size(adjustedPreviewSize.height, adjustedPreviewSize.width);
-                    }
-                    return Center(
-                      child: AspectRatio(
-                        aspectRatio: 1 / _controller!.value.aspectRatio,
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            final previewW = constraints.maxWidth;
-                            final previewH = constraints.maxHeight;
-                            return Stack(
-                              children: [
-                                CameraPreview(_controller!),
-                                if (_debugFace != null)
-                                  CustomPaint(
-                                    painter: FaceLandmarkPainter(
-                                      _debugFace!,
-                                      adjustedPreviewSize,
-                                      _controller!.description.lensDirection == CameraLensDirection.front,
-                                      previewW,
-                                      previewH,
-                                    ),
-                                    size: Size(previewW, previewH),
-                                  ),
-                                Positioned(
-                                  top: 40,
-                                  right: 40,
-                                  child: ElevatedButton(
-                                    onPressed: _toggleDebugMode,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                    ),
-                                    child: const Text('デバッグモード終了'),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
-                    );
-                  },
                 ),
               ),
-          // ゲーム画面
-          if (_isGameStarted)
-            Builder(
-              builder: (context) {
-                final windowRect = TrainInteriorPainter.getWindowRect(MediaQuery.of(context).size);
-                return Stack(
-                  children: [
-                    // 電車内のイラスト（背景）
-                    Positioned.fill(
-                      child: CustomPaint(
-                        painter: TrainInteriorPainter(
-                          offset: _sceneryAnimation.value,
-                          isEyesOpen: _isEyesOpen,
+            
+            // デバッグモードと他のゲーム画面要素はそのまま保持
+            if (_isDebugMode) 
+              if (kIsWeb)
+                Positioned.fill(
+                  child: Stack(
+                    children: [
+                      // カメラビューは透明なHtmlElementViewで配置
+                      Positioned.fill(
+                        child: Container(
+                          color: Colors.transparent, // 背景を透明に
+                          child: HtmlElementView(viewType: 'webcam-video'),
                         ),
                       ),
-                    ),
-                    // 窓の外の景色アニメーション（窓の内側だけにクリップ）
-                    Positioned(
-                      left: windowRect.left,
-                      top: windowRect.top,
-                      width: windowRect.width,
-                      height: windowRect.height,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(18),
-                        child: AnimatedSceneryWidget(
-                          offset: _sceneryAnimation.value,
-                          isEyesOpen: _isEyesOpen,
+                      
+                      // 顔のランドマークを表示するオーバーレイ
+                      if (_mediaPipeDebugResult != null)
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: MediaPipeFacePainter(
+                            _mediaPipeDebugResult,
+                            MediaQuery.of(context).size,
+                          ),
+                          foregroundPainter: _isDebugMode ? null : FaceDistanceWarningPainter(
+                            _mediaPipeDebugResult,
+                            MediaQuery.of(context).size,
+                          ),
                         ),
                       ),
-                    ),
-                    // 駅名表示とスコア表示（上部中央に縦並びカード風）
-                    Positioned(
-                      top: 24,
-                      left: 32,
-                      right: 32,
-                      child: Column(
-                        children: [
-                          // 駅名カード
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.5), // 透明度を 0.85 から 0.5 に変更
-                              borderRadius: BorderRadius.circular(28),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.10),
-                                  blurRadius: 16,
-                                  offset: const Offset(0, 4),
+                      
+                      // デバッグ情報オーバーレイ
+                      Positioned(
+                        right: 20,
+                        top: 20,
+                        child: Container(
+                          padding: const EdgeInsets.all(15),
+                          constraints: const BoxConstraints(maxWidth: 300),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.7),
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(color: Colors.white.withOpacity(0.3)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 12,
+                                    height: 12,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: _isMediaPipeInitialized ? Colors.green : Colors.red,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'MediaPipe: ${_isMediaPipeInitialized ? "初期化済み" : "未初期化"}',
+                                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _debugStatus,
+                                style: const TextStyle(color: Colors.white, fontSize: 14),
+                              ),
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: _isEyesOpen ? Colors.green.withOpacity(0.3) : Colors.red.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.train, color: Colors.blueAccent, size: 30),
-                                const SizedBox(width: 14),
-                                Text(
-                                  _currentStation,
-                                  style: GoogleFonts.mochiyPopOne(
-                                    fontSize: 26,
-                                    color: Colors.blueAccent,
-                                    letterSpacing: 2,
-                                    shadows: const [
-                                      Shadow(
-                                        color: Colors.black26,
-                                        offset: Offset(1, 2),
-                                        blurRadius: 6,
+                                child: Text(
+                                  '目の状態: ${_isEyesOpen ? "開いています" : "閉じています"}',
+                                  style: TextStyle(
+                                    color: _isEyesOpen ? Colors.greenAccent : Colors.redAccent,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      
+                      // タイトルへ戻るボタン (左上に丸く浮かせる)
+                      Positioned(
+                        top: 32,
+                        left: 17,
+                        child: Material(
+                          color: Colors.white.withOpacity(0.85),
+                          shape: const CircleBorder(),
+                          elevation: 6,
+                          child: IconButton(
+                            icon: const Icon(Icons.arrow_back, color: Colors.blueAccent, size: 28),
+                            onPressed: _resetToTitle,
+                            tooltip: 'タイトルへ',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (_controller != null && _controller!.value.isInitialized)
+                Positioned.fill(
+                  child: Builder(
+                    builder: (context) {
+                      // スクリーンサイズの取得
+                      final screenSize = MediaQuery.of(context).size;
+                      final isSmallScreen = screenSize.height < 600;
+                      
+                      Size adjustedPreviewSize = _controller!.value.previewSize!;
+                      if (MediaQuery.of(context).orientation == Orientation.portrait && adjustedPreviewSize.width > adjustedPreviewSize.height) {
+                        adjustedPreviewSize = Size(adjustedPreviewSize.height, adjustedPreviewSize.width);
+                      }
+                      return Center(
+                        child: AspectRatio(
+                          aspectRatio: 1 / _controller!.value.aspectRatio,
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final previewW = constraints.maxWidth;
+                              final previewH = constraints.maxHeight;
+                              return Stack(
+                                children: [
+                                  CameraPreview(_controller!),
+                                  if (_debugFace != null)
+                                    CustomPaint(
+                                      painter: FaceLandmarkPainter(
+                                        _debugFace!,
+                                        adjustedPreviewSize,
+                                        _controller!.description.lensDirection == CameraLensDirection.front,
+                                        previewW,
+                                        previewH,
                                       ),
-                                    ],
+                                      size: Size(previewW, previewH),
+                                    ),
+                                  Positioned(
+                                    top: 40,
+                                    right: 40,
+                                    child: ElevatedButton(
+                                      onPressed: _toggleDebugMode,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red,
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: isSmallScreen ? 16 : 24, 
+                                          vertical: isSmallScreen ? 10 : 12
+                                        ),
+                                      ),
+                                      child: Text(
+                                        'デバッグモード終了',
+                                        style: TextStyle(
+                                          fontSize: isSmallScreen ? 12 : 14,
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
+                                ],
+                              );
+                            },
                           ),
-                          const SizedBox(height: 12),
-                          // スコアバッジ
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFFFFD700), Color(0xFFFFA000)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                
+            // ゲーム画面も同様に保持
+            if (_isGameStarted)
+              Builder(
+                builder: (context) {
+                  // スクリーンサイズの取得（レスポンシブ対応）
+                  final screenSize = MediaQuery.of(context).size;
+                  final isSmallScreen = screenSize.height < 600;
+
+                  final windowRect = TrainInteriorPainter.getWindowRect(screenSize);
+                  return Stack(
+                    children: [
+                      // 電車内のイラスト（背景）
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: TrainInteriorPainter(
+                            offset: _sceneryAnimation.value,
+                            isEyesOpen: _isEyesOpen,
+                          ),
+                        ),
+                      ),
+                      // 窓の外の景色アニメーション（窓の内側だけにクリップ）
+                      Positioned(
+                        left: windowRect.left,
+                        top: windowRect.top,
+                        width: windowRect.width,
+                        height: windowRect.height,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(18),
+                          child: AnimatedSceneryWidget(
+                            offset: _sceneryAnimation.value,
+                            isEyesOpen: _isEyesOpen,
+                          ),
+                        ),
+                      ),
+                      // 駅名表示とスコア表示（上部中央に縦並びカード風）
+                      Positioned(
+                        top: isSmallScreen ? 16 : 24,
+                        left: 32,
+                        right: 32,
+                        child: Column(
+                          children: [
+                            // 駅名カード
+                            Container(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isSmallScreen ? 20 : 28, 
+                                vertical: isSmallScreen ? 12 : 16
                               ),
-                              borderRadius: BorderRadius.circular(22),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.amberAccent,
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.star, color: Colors.white, size: 24),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'SCORE',
-                                  style: GoogleFonts.mochiyPopOne(
-                                    fontSize: 18,
-                                    color: Colors.white,
-                                    letterSpacing: 1,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.5), // 透明度を 0.85 から 0.5 に変更
+                                borderRadius: BorderRadius.circular(28),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.10),
+                                    blurRadius: 16,
+                                    offset: const Offset(0, 4),
                                   ),
-                                ),
-                                const SizedBox(width: 10),
-                                Text(
-                                  '$_score',
-                                  style: GoogleFonts.mochiyPopOne(
-                                    fontSize: 22,
-                                    color: Colors.white,
-                                    letterSpacing: 1,
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.train, color: Colors.blueAccent, size: isSmallScreen ? 24 : 30),
+                                  SizedBox(width: isSmallScreen ? 10 : 14),
+                                  Text(
+                                    _currentStation,
+                                    style: GoogleFonts.mochiyPopOne(
+                                      fontSize: isSmallScreen ? 22 : 26,
+                                      color: Colors.blueAccent,
+                                      letterSpacing: 2,
+                                      shadows: const [
+                                        Shadow(
+                                          color: Colors.black26,
+                                          offset: Offset(1, 2),
+                                          blurRadius: 6,
+                                        ),
+                                      ],
+                                    ),
                                   ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            // スコアバッジ
+                            Container(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isSmallScreen ? 20 : 24, 
+                                vertical: isSmallScreen ? 8 : 10
+                              ),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFFFFD700), Color(0xFFFFA000)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
                                 ),
-                              ],
+                                borderRadius: BorderRadius.circular(22),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.amberAccent,
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.star, color: Colors.white, size: isSmallScreen ? 20 : 24),
+                                  SizedBox(width: isSmallScreen ? 6 : 8),
+                                  Text(
+                                    'SCORE',
+                                    style: GoogleFonts.mochiyPopOne(
+                                      fontSize: isSmallScreen ? 16 : 18,
+                                      color: Colors.white,
+                                      letterSpacing: 1,
+                                    ),
+                                  ),
+                                  SizedBox(width: isSmallScreen ? 8 : 10),
+                                  Text(
+                                    '$_score',
+                                    style: GoogleFonts.mochiyPopOne(
+                                      fontSize: isSmallScreen ? 18 : 22,
+                                      color: Colors.white,
+                                      letterSpacing: 1,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // 顔認識状態表示（右下）
+                      Positioned(
+                        right: 16,
+                        bottom: isSmallScreen ? 20 : 32,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.65),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Text(
+                            _debugStatus,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: isSmallScreen ? 13 : 15,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                    // 顔認識状態表示（右下）
-                    Positioned(
-                      right: 16,
-                      bottom: 32,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.65),
-                          borderRadius: BorderRadius.circular(14),
                         ),
-                        child: Text(
-                          _debugStatus,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
+                      ),
+                      // 降りる!ボタン（下中央に大きく）
+                      Positioned(
+                        // 位置調整：十分な余白を確保し、オーバーフローを防止
+                        bottom: isSmallScreen ? 40 : 60, // より大きな値に
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              if (_currentStation == '福工大前') {
+                                _isGameOver = true;
+                                _isGameStarted = false;
+                                _stationTimer?.cancel();
+                                await _showGameOver(message: 'ゲームクリア！福工大前で降りました！', isClear: true);
+                              } else {
+                                _isGameOver = true;
+                                _isGameStarted = false;
+                                _stationTimer?.cancel();
+                                await _showGameOver(message: '${_currentStation}で降りてしまいました。ゲームオーバー！');
+                              }
+                            },
+                            icon: Icon(Icons.directions_walk, color: Colors.white, size: isSmallScreen ? 24 : 28),
+                            label: Text(
+                              '降りる！',
+                              style: GoogleFonts.mochiyPopOne(
+                                fontSize: isSmallScreen ? 18 : 22,
+                                color: Colors.white,
+                                letterSpacing: 2,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orangeAccent,
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isSmallScreen ? 28 : 36, 
+                                vertical: isSmallScreen ? 14 : 18
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(32),
+                              ),
+                              elevation: 12,
+                              shadowColor: Colors.orangeAccent,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    // 降りる!ボタン（下中央に大きく）
-                    Positioned(
-                      bottom: MediaQuery.of(context).padding.bottom + 32,
-                      left: MediaQuery.of(context).size.width * 0.5 - 100,
-                      child: ElevatedButton.icon(
-                        onPressed: () async {
-                          if (_currentStation == '福工大前') {
-                            _isGameOver = true;
-                            _isGameStarted = false;
-                            _stationTimer?.cancel();
-                            await _showGameOver(message: 'ゲームクリア！福工大前で降りました！', isClear: true);
-                          } else {
-                            _isGameOver = true;
-                            _isGameStarted = false;
-                            _stationTimer?.cancel();
-                            await _showGameOver(message: '${_currentStation}で降りてしまいました。ゲームオーバー！');
-                          }
-                        },
-                        icon: const Icon(Icons.directions_walk, color: Colors.white, size: 28),
-                        label: Text(
-                          '降りる！',
-                          style: GoogleFonts.mochiyPopOne(
-                            fontSize: 22,
-                            color: Colors.white,
-                            letterSpacing: 2,
-                          ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orangeAccent,
-                          padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 18),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(32),
-                          ),
-                          elevation: 12,
-                          shadowColor: Colors.orangeAccent,
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-        ],
+                    ],
+                  );
+                },
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -2873,5 +2851,42 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         ),
       );
     }
+  }
+
+  // アクションボタンを作成するヘルパーメソッド
+  Widget _buildActionButton({
+    required VoidCallback? onPressed,
+    required IconData icon,
+    required String label,
+    required Color color,
+    required bool isSmallScreen,
+    double? width,
+  }) {
+    return SizedBox(
+      width: width,
+      height: isSmallScreen ? 44 : 48,
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: isSmallScreen ? 20 : 22),
+        label: Text(
+          label,
+          style: GoogleFonts.mochiyPopOne(
+            fontSize: isSmallScreen ? 14 : 16,
+            color: Colors.white,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.symmetric(
+            horizontal: isSmallScreen ? 16 : 20,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          elevation: 4,
+        ),
+      ),
+    );
   }
 }
