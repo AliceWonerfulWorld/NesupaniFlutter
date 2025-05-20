@@ -1,17 +1,46 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 import 'screens/eye_detection/eye_detection_screen.dart';
+import 'services/game_service.dart';
+// URLを開くためのライブラリをインポート
+import 'dart:html' as html;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Firebaseの初期化
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  
+  // ゲームサービスの初期化
+  final gameService = GameService();
+  // 認証を試みる（STAGE3開始条件を満たしているか確認）
+  final isAuthenticated = await gameService.initialize();
+  
+  // カメラの初期化
   final cameras = await availableCameras();
-  runApp(MyApp(cameras: cameras));
+  
+  runApp(MyApp(
+    cameras: cameras,
+    gameService: gameService,
+    isAuthenticated: isAuthenticated,
+  ));
 }
 
 class MyApp extends StatelessWidget {
   final List<CameraDescription> cameras;
+  final GameService gameService;
+  final bool isAuthenticated;
 
-  const MyApp({super.key, required this.cameras});
+  const MyApp({
+    super.key,
+    required this.cameras,
+    required this.gameService,
+    required this.isAuthenticated,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -36,8 +65,116 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      home: EyeDetectionScreen(cameras: cameras),
+      home: isAuthenticated || gameService.isFreePlay
+          ? EyeDetectionScreen(cameras: cameras, gameService: gameService)
+          : AuthErrorScreen(gameService: gameService),
     );
+  }
+}
+
+/// 認証エラー画面
+/// ゲーム開始条件を満たさない場合に表示
+class AuthErrorScreen extends StatelessWidget {
+  final GameService gameService;
+
+  const AuthErrorScreen({
+    super.key,
+    required this.gameService,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.blueGrey[900],
+      body: Center(
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          margin: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.2),
+                blurRadius: 10,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                color: Colors.red,
+                size: 64,
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'ゲームを開始できません',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                gameService.errorMessage.isNotEmpty
+                    ? gameService.errorMessage
+                    : 'LINEボットから発行されたIDでアクセスしてください',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
+                onPressed: () {
+                  // LINEに戻るボタン
+                  // LINEアプリを起動
+                  final urlScheme = Uri.parse('https://line.me/R/');
+                  // Web版では直接リンクさせることができないので、
+                  // 新しいタブでLINEのWebサイトを開く
+                  openUrl(urlScheme.toString());
+                },
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('LINEに戻る'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF06C755), // LINE緑
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () {
+                  // フリープレイモードを有効にして再度ゲームを開始
+                  gameService.setFreePlayMode();
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (context) => EyeDetectionScreen(
+                        cameras: [],  // カメラは使用時に初期化される
+                        gameService: gameService,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.videogame_asset),
+                label: const Text('フリープレイモード'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
+  /// URLを開く
+  void openUrl(String url) {
+    // Web版ではJavaScriptのwindow.open()を使用
+    html.window.open(url, '_blank');
   }
 }
 
