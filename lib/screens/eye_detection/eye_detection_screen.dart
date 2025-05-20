@@ -10,7 +10,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:js/js.dart' as packageJs; // Renamed alias to avoid conflict
 import 'dart:js' as dartJs; // Added for allowInterop
-import 'package:universal_html/html.dart' as html;
+// URLを開くためのライブラリ
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
 import 'dart:ui' as ui;
 import 'dart:js_util' as js_util;
 import 'dart:ui_web' if (dart.library.io) 'dart:ui' as ui_web;
@@ -18,6 +20,64 @@ import 'dart:math' as math; // math関数を使用するためのインポート
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:google_fonts/google_fonts.dart';  // Google Fontsをインポート
+import 'package:nesupani/services/game_service.dart'; // GameServiceのインポート
+
+// 背景のタイプを定義する列挙型
+enum BackgroundType {
+  dawn,    // 朝焼け
+  morning, // 朝
+  daytime, // 昼
+  sunset,  // 夕焼け
+  night,   // 夜
+  rainy,   // 雨
+  snowy,   // 雪
+  autumn,  // 紅葉
+}
+
+// 背景タイプの名前と対応するアイコンを取得する拡張機能
+extension BackgroundTypeExtension on BackgroundType {
+  String get name {
+    switch (this) {
+      case BackgroundType.dawn:
+        return '朝焼け';
+      case BackgroundType.morning:
+        return '朝';
+      case BackgroundType.daytime:
+        return '昼';
+      case BackgroundType.sunset:
+        return '夕焼け';
+      case BackgroundType.night:
+        return '夜';
+      case BackgroundType.rainy:
+        return '雨';
+      case BackgroundType.snowy:
+        return '雪';
+      case BackgroundType.autumn:
+        return '紅葉';
+    }
+  }
+  
+  IconData get icon {
+    switch (this) {
+      case BackgroundType.dawn:
+        return Icons.wb_twilight;
+      case BackgroundType.morning:
+        return Icons.wb_sunny;
+      case BackgroundType.daytime:
+        return Icons.light_mode;
+      case BackgroundType.sunset:
+        return Icons.nightlight;
+      case BackgroundType.night:
+        return Icons.dark_mode;
+      case BackgroundType.rainy:
+        return Icons.umbrella;
+      case BackgroundType.snowy:
+        return Icons.ac_unit;
+      case BackgroundType.autumn:
+        return Icons.eco;
+    }
+  }
+}
 
 // MediaPipe Task objects will be handled by js_util typically,
 // but if direct JS interop with @JS is needed for some structures, keep js.dart.
@@ -48,9 +108,13 @@ class StarPainter extends CustomPainter {
 
 // タイトル画面の背景を描画するCustomPainter
 class TitleScreenBackgroundPainter extends CustomPainter {
+  final BackgroundType backgroundType;
+  
+  TitleScreenBackgroundPainter({this.backgroundType = BackgroundType.morning});
+  
   @override
   void paint(Canvas canvas, Size size) {
-    // 1. 空と遠景を最初に描画
+    // 1. 背景タイプに基づいて空と遠景を描画
     _drawSkyAndScenery(canvas, size);
 
     // 2. 電車内の前景要素（座席など）を描画
@@ -61,30 +125,128 @@ class TitleScreenBackgroundPainter extends CustomPainter {
 
     // 4. ガラス効果を最後に描画
     _drawGlassEffects(canvas, size);
+    
+    // 5. 背景タイプに応じた特殊効果を描画
+    _drawSpecialEffects(canvas, size);
   }
 
   void _drawSkyAndScenery(Canvas canvas, Size size) {
-    // 早朝の空のグラデーション
+    // 背景タイプに応じて異なる空のグラデーションを設定
+    List<Color> skyColors;
+    List<double> colorStops;
+    
+    switch (backgroundType) {
+      case BackgroundType.dawn: // 朝焼け
+        skyColors = [
+          const Color(0xFF1A1A2E), // 夜の名残
+          const Color(0xFF6A5D7B), // 夜明け前の薄紫
+          const Color(0xFFB88AAB), // ピンクがかった紫
+          const Color(0xFFFFB08F), // 朝焼けのオレンジ
+          const Color(0xFFADD8E6), // 明るい水色
+        ];
+        colorStops = [0.0, 0.3, 0.55, 0.75, 1.0];
+        break;
+        
+      case BackgroundType.morning: // 朝
+        skyColors = [
+          const Color(0xFF87CEEB), // 明るい空色
+          const Color(0xFF97DEFF), // より明るい青
+          const Color(0xFFADE8F4), // 薄い青
+          const Color(0xFFCAF0F8), // さらに薄い青
+        ];
+        colorStops = [0.0, 0.3, 0.6, 1.0];
+        break;
+        
+      case BackgroundType.daytime: // 昼
+        skyColors = [
+          const Color(0xFF1E88E5), // 濃い青
+          const Color(0xFF42A5F5), // 標準的な青
+          const Color(0xFF90CAF9), // 明るい青
+        ];
+        colorStops = [0.0, 0.5, 1.0];
+        break;
+        
+      case BackgroundType.sunset: // 夕焼け
+        skyColors = [
+          const Color(0xFF4A4969), // 暗い紫青
+          const Color(0xFF7B6B8D), // 紫がかった色
+          const Color(0xFFE98C6E), // 橙色
+          const Color(0xFFF2D0A4), // 淡い黄色
+        ];
+        colorStops = [0.0, 0.3, 0.65, 1.0];
+        break;
+        
+      case BackgroundType.night: // 夜
+        skyColors = [
+          const Color(0xFF0D1321), // 暗い青黒
+          const Color(0xFF1D2D50), // 濃い紺
+          const Color(0xFF4A6FA5), // 薄い紺
+        ];
+        colorStops = [0.0, 0.6, 1.0];
+        break;
+        
+      case BackgroundType.rainy: // 雨
+        skyColors = [
+          const Color(0xFF2C3333), // 暗い灰色
+          const Color(0xFF4F646F), // 青みがかった灰色
+          const Color(0xFF7D8E9B), // 薄い灰色
+        ];
+        colorStops = [0.0, 0.5, 1.0];
+        break;
+        
+      case BackgroundType.snowy: // 雪
+        skyColors = [
+          const Color(0xFFB8C5D6), // 薄い青灰色
+          const Color(0xFFD2DDE9), // 青みがかった白
+          const Color(0xFFEDF2F7), // ほぼ白
+        ];
+        colorStops = [0.0, 0.5, 1.0];
+        break;
+        
+      case BackgroundType.autumn: // 紅葉
+        skyColors = [
+          const Color(0xFF7D6B7D), // 紫がかった灰色
+          const Color(0xFF9C7C86), // 薄い赤紫
+          const Color(0xFFE3BAB3), // 薄い桃色
+          const Color(0xFFFFE8D6), // クリーム色
+        ];
+        colorStops = [0.0, 0.4, 0.7, 1.0];
+        break;
+    }
+
+    // 空のグラデーション描画
     final skyPaint = Paint()
       ..shader = ui.Gradient.linear(
         Offset(size.width / 2, 0),
         Offset(size.width / 2, size.height),
-        [
-          const Color(0xFF3A3A5A), // 夜の名残の濃い紫
-          const Color(0xFF6A5D7B), // 夜明け前の薄紫
-          const Color(0xFFB88AAB), // ピンクがかった紫
-          const Color(0xFFFFB08F), // 朝焼けのオレンジ
-          const Color(0xFFADD8E6), // 明るい水色 (空の上部へ)
-        ],
-        [0.0, 0.3, 0.55, 0.75, 1.0],
+        skyColors,
+        colorStops,
       );
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), skyPaint);
 
-    // 雲の描画 (複数のレイヤーで奥行きを出す)
+    // 雲の描画 (背景タイプに応じて調整)
     _drawClouds(canvas, size);
 
-    // 遠景のシルエット (よりディテールアップ)
-    final silhouettePaint = Paint()..color = const Color(0xFF424242).withOpacity(0.5);
+    // 遠景のシルエット (背景タイプに応じて調整)
+    Color silhouetteColor;
+    double opacity;
+    
+    switch (backgroundType) {
+      case BackgroundType.night:
+        silhouetteColor = const Color(0xFF1A1A2A);
+        opacity = 0.8;
+        break;
+      case BackgroundType.rainy:
+      case BackgroundType.snowy:
+        silhouetteColor = const Color(0xFF464646);
+        opacity = 0.4;
+        break;
+      default:
+        silhouetteColor = const Color(0xFF424242);
+        opacity = 0.5;
+    }
+
+    final silhouettePaint = Paint()..color = silhouetteColor.withOpacity(opacity);
     final path = Path();
     path.moveTo(0, size.height * 0.75);
     path.cubicTo(size.width * 0.1, size.height * 0.7, size.width * 0.15, size.height * 0.78, size.width * 0.25, size.height * 0.72);
@@ -98,7 +260,7 @@ class TitleScreenBackgroundPainter extends CustomPainter {
     path.close();
     canvas.drawPath(path, silhouettePaint);
 
-    final distantSilhouettePaint = Paint()..color = const Color(0xFF616161).withOpacity(0.3);
+    final distantSilhouettePaint = Paint()..color = silhouetteColor.withOpacity(opacity * 0.6);
     final distantPath = Path();
     distantPath.moveTo(0, size.height * 0.8);
     distantPath.quadraticBezierTo(size.width * 0.2, size.height * 0.75, size.width * 0.4, size.height * 0.78);
@@ -111,14 +273,63 @@ class TitleScreenBackgroundPainter extends CustomPainter {
   }
 
   void _drawClouds(Canvas canvas, Size size) {
-    final cloudPaint = Paint();
     final random = math.Random(123); // シード固定で毎回同じ雲に
+    
+    // 背景タイプに応じて雲の色と量を調整
+    Color baseCloudColor;
+    double opacityMultiplier;
+    int cloudCountMultiplier;
+    
+    switch (backgroundType) {
+      case BackgroundType.dawn:
+        baseCloudColor = Colors.pink[50]!;
+        opacityMultiplier = 0.6;
+        cloudCountMultiplier = 1;
+        break;
+      case BackgroundType.morning:
+        baseCloudColor = Colors.white;
+        opacityMultiplier = 0.9;
+        cloudCountMultiplier = 1;
+        break;
+      case BackgroundType.daytime:
+        baseCloudColor = Colors.white;
+        opacityMultiplier = 1.0;
+        cloudCountMultiplier = 1;
+        break;
+      case BackgroundType.sunset:
+        baseCloudColor = Colors.orange[100]!;
+        opacityMultiplier = 0.8;
+        cloudCountMultiplier = 1;
+        break;
+      case BackgroundType.night:
+        baseCloudColor = Colors.grey[700]!;
+        opacityMultiplier = 0.4;
+        cloudCountMultiplier = 1;
+        break;
+      case BackgroundType.rainy:
+        baseCloudColor = Colors.grey[500]!;
+        opacityMultiplier = 0.9;
+        cloudCountMultiplier = 2; // 雨の日は雲が多い
+        break;
+      case BackgroundType.snowy:
+        baseCloudColor = Colors.grey[300]!;
+        opacityMultiplier = 0.8;
+        cloudCountMultiplier = 2; // 雪の日は雲が多い
+        break;
+      case BackgroundType.autumn:
+        baseCloudColor = Colors.white;
+        opacityMultiplier = 0.7;
+        cloudCountMultiplier = 1;
+        break;
+    }
+
+    final cloudPaint = Paint();
 
     // 雲の色々なバリエーション
     List<CloudProps> cloudProperties = [
-      CloudProps(color: Colors.white.withOpacity(0.5), blurRadius: 20.0, count: 3, yFactor: 0.3, sizeFactor: 0.25),
-      CloudProps(color: Colors.grey[300]!.withOpacity(0.4), blurRadius: 30.0, count: 2, yFactor: 0.4, sizeFactor: 0.35),
-      CloudProps(color: Colors.white.withOpacity(0.6), blurRadius: 15.0, count: 4, yFactor: 0.25, sizeFactor: 0.2),
+      CloudProps(color: baseCloudColor.withOpacity(0.5 * opacityMultiplier), blurRadius: 20.0, count: 3 * cloudCountMultiplier, yFactor: 0.3, sizeFactor: 0.25),
+      CloudProps(color: Colors.grey[300]!.withOpacity(0.4 * opacityMultiplier), blurRadius: 30.0, count: 2 * cloudCountMultiplier, yFactor: 0.4, sizeFactor: 0.35),
+      CloudProps(color: baseCloudColor.withOpacity(0.6 * opacityMultiplier), blurRadius: 15.0, count: 4 * cloudCountMultiplier, yFactor: 0.25, sizeFactor: 0.2),
     ];
 
     for (var props in cloudProperties) {
@@ -135,11 +346,150 @@ class TitleScreenBackgroundPainter extends CustomPainter {
     }
   }
 
-  void _drawTrainInteriorElements(Canvas canvas, Size size) {
-    // 窓枠の内側の壁 (ゲーム中と似た色合いで)
-    // final wallPaint = Paint()..color = const Color(0xFFFFF8E1); // TrainInteriorPainterの壁の色に近いもの
-    // canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), wallPaint); // 全面塗りは削除
+  // 特殊効果を描画する (雨、雪、星など)
+  void _drawSpecialEffects(Canvas canvas, Size size) {
+    switch (backgroundType) {
+      case BackgroundType.night:
+        _drawStars(canvas, size);
+        break;
+      case BackgroundType.rainy:
+        _drawRain(canvas, size);
+        break;
+      case BackgroundType.snowy:
+        _drawSnow(canvas, size);
+        break;
+      case BackgroundType.autumn:
+        _drawFallingLeaves(canvas, size);
+        break;
+      default:
+        // 特に効果なし
+        break;
+    }
+  }
+  
+  // 星を描画
+  void _drawStars(Canvas canvas, Size size) {
+    final random = math.Random(456); // 固定シードで一貫した配置
+    final starPaint = Paint()..color = Colors.white;
+    
+    // 大きさの異なる星を描画
+    for (int i = 0; i < 50; i++) {
+      final x = random.nextDouble() * size.width;
+      final y = random.nextDouble() * size.height * 0.7; // 空の上部に限定
+      final radius = random.nextDouble() * 1.2 + 0.3; // 0.3〜1.5の大きさ
+      final opacity = random.nextDouble() * 0.5 + 0.5; // 0.5〜1.0の透明度
+      
+      starPaint.color = Colors.white.withOpacity(opacity);
+      canvas.drawCircle(Offset(x, y), radius, starPaint);
+    }
+    
+    // いくつかの星をきらめかせる (大きな星)
+    for (int i = 0; i < 10; i++) {
+      final x = random.nextDouble() * size.width;
+      final y = random.nextDouble() * size.height * 0.6; // さらに上部に限定
+      final radius = random.nextDouble() * 0.8 + 1.2; // 1.2〜2.0の大きさ (大きめ)
+      
+      // きらめき効果 (グラデーションで)
+      final shimmerPaint = Paint()
+        ..shader = ui.Gradient.radial(
+          Offset(x, y),
+          radius * 2.5,
+          [
+            Colors.white.withOpacity(0.8),
+            Colors.white.withOpacity(0.3),
+            Colors.white.withOpacity(0.0),
+          ],
+          [0.0, 0.5, 1.0],
+        );
+      
+      canvas.drawCircle(Offset(x, y), radius * 2.5, shimmerPaint);
+      canvas.drawCircle(Offset(x, y), radius, starPaint..color = Colors.white.withOpacity(0.9));
+    }
+  }
+  
+  // 雨を描画
+  void _drawRain(Canvas canvas, Size size) {
+    final random = math.Random(789);
+    final rainPaint = Paint()
+      ..color = Colors.white.withOpacity(0.4)
+      ..strokeWidth = 1.0
+      ..strokeCap = StrokeCap.round;
+    
+    for (int i = 0; i < 100; i++) {
+      final x = random.nextDouble() * size.width;
+      final y = random.nextDouble() * size.height * 0.7; // 窓の上部に限定
+      final length = random.nextDouble() * 10 + 5; // 5〜15の長さ
+      
+      canvas.drawLine(
+        Offset(x, y),
+        Offset(x - length * 0.3, y + length), // 少し斜めに
+        rainPaint,
+      );
+    }
+  }
+  
+  // 雪を描画
+  void _drawSnow(Canvas canvas, Size size) {
+    final random = math.Random(101112);
+    final snowPaint = Paint()..color = Colors.white.withOpacity(0.7);
+    
+    for (int i = 0; i < 80; i++) {
+      final x = random.nextDouble() * size.width;
+      final y = random.nextDouble() * size.height * 0.7; // 窓の上部に限定
+      final radius = random.nextDouble() * 2.0 + 1.0; // 1.0〜3.0の大きさ
+      
+      canvas.drawCircle(Offset(x, y), radius, snowPaint);
+    }
+  }
+  
+  // 落ち葉を描画
+  void _drawFallingLeaves(Canvas canvas, Size size) {
+    final random = math.Random(131415);
+    
+    // 異なる色の落ち葉
+    final leafColors = [
+      Color(0xFFFF6B35), // オレンジ
+      Color(0xFFF7C59F), // 薄橙
+      Color(0xFFDDA448), // 黄土色
+      Color(0xFFB83B5E), // 赤紫
+      Color(0xFF9F5F80), // 薄紫
+    ];
+    
+    for (int i = 0; i < 25; i++) {
+      final x = random.nextDouble() * size.width;
+      final y = random.nextDouble() * size.height * 0.7; // 窓の上部に限定
+      final leafSize = random.nextDouble() * 6.0 + 4.0; // 4.0〜10.0の大きさ
+      final colorIndex = random.nextInt(leafColors.length);
+      final rotation = random.nextDouble() * 2 * math.pi; // 0〜2πのランダムな回転
+      
+      // 簡易的な葉っぱの形
+      final leafPath = Path();
+      canvas.save();
+      canvas.translate(x, y);
+      canvas.rotate(rotation);
+      
+      // 楕円形の葉
+      leafPath.addOval(Rect.fromCenter(
+        center: Offset.zero,
+        width: leafSize * 1.5,
+        height: leafSize,
+      ));
+      
+      // 中央の線 (葉脈)
+      final veinPaint = Paint()
+        ..color = Colors.brown.withOpacity(0.5)
+        ..strokeWidth = 0.8
+        ..style = PaintingStyle.stroke;
+      
+      canvas.drawPath(leafPath, Paint()..color = leafColors[colorIndex].withOpacity(0.6));
+      canvas.drawLine(Offset(-leafSize * 0.75, 0), Offset(leafSize * 0.75, 0), veinPaint);
+      
+      canvas.restore();
+    }
+  }
 
+  // 以下の既存メソッドはそのまま残す
+  void _drawTrainInteriorElements(Canvas canvas, Size size) {
     // 座席の背もたれの上部が少し見える (より具体的に窓の下部に合わせて描画)
     final seatTopPaint = Paint()..color = const Color(0xFF8D6E63); // より濃い木目調（TrainInteriorPainterの座席木部）
     final seatShadowPaint = Paint()..color = Colors.black.withOpacity(0.15);
@@ -168,27 +518,6 @@ class TitleScreenBackgroundPainter extends CustomPainter {
     // double innerPadding = 5.0; // 未使用なのでコメントアウト
     double cornerRadiusValue = 20.0;
     Radius cornerRadius = Radius.circular(cornerRadiusValue);
-
-    // 外枠 (金属風 - 暗め) - この部分が画面全体を塗りつぶしていたので削除
-    // final outerFramePaint = Paint()
-    //   ..shader = ui.Gradient.linear(
-    //     Offset(0,0), Offset(size.width, size.height),
-    //     [const Color(0xFF757575), const Color(0xFF424242)],
-    //   )
-    //   ..style = PaintingStyle.fill;
-    // RRect outerRRect = RRect.fromRectAndRadius(
-    //     Rect.fromLTWH(0, 0, size.width, size.height), cornerRadius);
-    // canvas.drawRRect(outerRRect, outerFramePaint);
-
-    // 窓の開口部を定義 (この内側に空が見える)
-    Rect windowOpeningRect = Rect.fromLTWH(
-      frameThickness,
-      frameThickness,
-      size.width - frameThickness * 2,
-      // 座席の高さを考慮して、窓の下端を少し上げる
-      size.height - frameThickness * 2 - (size.height * 0.1) - frameThickness, 
-    );
-    RRect windowOpeningRRect = RRect.fromRectAndRadius(windowOpeningRect, Radius.circular(cornerRadiusValue - frameThickness / 2 > 0 ? cornerRadiusValue - frameThickness / 2 : 5));
 
     // 1. 金属風の外枠の「フチ」 (strokeで)
     final metalEdgePaint = Paint()
@@ -278,7 +607,12 @@ class TitleScreenBackgroundPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    if (oldDelegate is TitleScreenBackgroundPainter) {
+      return oldDelegate.backgroundType != backgroundType;
+    }
+    return true;
+  }
 }
 
 // Helper class for cloud properties
@@ -300,10 +634,13 @@ class CloudProps {
 
 class EyeDetectionScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
+  // GameServiceインスタンスを追加
+  final GameService gameService;
   
   const EyeDetectionScreen({
     super.key,
     required this.cameras,
+    required this.gameService,
   });
 
   @override
@@ -330,6 +667,9 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   bool _isEyesOpen = true;
   late AnimationController _animationController;
   late Animation<double> _sceneryAnimation;
+  
+  // ランダムな背景タイプを保持する変数
+  BackgroundType _currentBackgroundType = BackgroundType.morning;
   
   // スコア計算に関する変数
   bool _wasEyesClosedDuringStation = false; // 現在の駅で目を閉じていたか
@@ -383,6 +723,9 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    
+    // アプリ起動時にランダムな背景タイプを選択
+    _selectRandomBackground();
     
     // アプリ起動時の確実な初期化（最初のゲームから動くように）
     _performOneTimeInitialization();
@@ -1043,6 +1386,9 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     await _gameClearSoundPlayer?.stop();
     print('タイトルに戻ります: SE停止完了');
     
+    // 背景をランダムに変更
+    _selectRandomBackground();
+    
     setState(() {
       _isGameStarted = false;
       _isGameOver = false;
@@ -1087,6 +1433,23 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     if (isClear) {
       _gameClearSoundPlayer?.seek(Duration.zero); // 再生位置を最初に戻す
       _gameClearSoundPlayer?.play();
+      
+      // フリープレイモードではLINE連携処理をスキップ
+      if (!widget.gameService.isFreePlay) {
+        // ゲームクリア情報をFirestoreに保存し、LINEボットに通知
+        try {
+          final success = await widget.gameService.completeGame(_score);
+          if (success) {
+            print('ゲームクリア情報をLINEボットに送信しました: スコア $_score');
+          } else {
+            print('ゲームクリア情報の送信に失敗しました: ${widget.gameService.errorMessage}');
+          }
+        } catch (e) {
+          print('ゲームクリア情報送信エラー: $e');
+        }
+      } else {
+        print('フリープレイモードのためLINE連携処理をスキップしました');
+      }
     } else {
       _gameOverSoundPlayer?.seek(Duration.zero); // 再生位置を最初に戻す
       _gameOverSoundPlayer?.play();
@@ -1174,13 +1537,54 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                 ),
               ),
               const SizedBox(height: 24),
+              // フリープレイモード表示
+              if (widget.gameService.isFreePlay && isClear)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.withOpacity(0.6)),
+                  ),
+                  child: Text(
+                    'フリープレイモード',
+                    style: GoogleFonts.mochiyPopOne(
+                      fontSize: 16,
+                      color: Colors.deepOrange,
+                    ),
+                  ),
+                ),
+              // LINEに戻るボタンを追加（クリア時のみ、かつフリープレイでない場合）
+              if (isClear && !widget.gameService.isFreePlay)
+                ElevatedButton.icon(
+                  onPressed: () {
+                    // LINEに戻るボタン
+                    Navigator.of(context).pop();
+                    // LINEアプリを起動
+                    _openUrl('https://line.me/R/');
+                  },
+                  icon: const Icon(Icons.chat),
+                  label: Text('LINEに戻る', style: GoogleFonts.mochiyPopOne()),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF06C755), // LINE緑
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                    elevation: 8,
+                  ),
+                ),
+              if (isClear && !widget.gameService.isFreePlay)
+                const SizedBox(height: 16),
               ElevatedButton.icon(
                 onPressed: () async {
                   Navigator.of(context).pop();
+                  // 背景をランダムに変更してからタイトルへ戻る
+                  _selectRandomBackground();
                   await _resetToTitle();
                 },
                 icon: const Icon(Icons.home),
-                label: Text('タイトルへ戻る', style: GoogleFonts.mochiyPopOne()),
+                label: Text(isClear ? 'タイトルへ戻る' : 'タイトルへ戻る', style: GoogleFonts.mochiyPopOne()),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: isClear ? Colors.amber : Colors.pinkAccent,
                   foregroundColor: Colors.white,
@@ -1194,6 +1598,12 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         ),
       ),
     );
+  }
+
+  // URLを開くヘルパーメソッド
+  void _openUrl(String url) {
+    // Web上でURLを開く（すでにインポート済みのhtmlライブラリを使用）
+    html.window.open(url, '_blank');
   }
 
   void _startWebFaceDetectionLoop() {
@@ -1435,10 +1845,12 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     return Scaffold(
       body: Stack(
         children: [
-          // 新しいタイトル画面背景 (電車の窓風)
+          // 新しいタイトル画面背景 (電車の窓風) - ランダムな背景タイプを使用
           Positioned.fill(
             child: CustomPaint(
-              painter: TitleScreenBackgroundPainter(),
+              painter: TitleScreenBackgroundPainter(
+                backgroundType: _currentBackgroundType,
+              ),
             ),
           ),
           // 昇る太陽の表現は削除
@@ -1512,6 +1924,33 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                           ),
                         ),
                         const SizedBox(height: 12),
+                        // 現在の背景タイプを表示
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.3),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _currentBackgroundType.icon,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                _currentBackgroundType.name,
+                                style: GoogleFonts.mochiyPopOne(
+                                  fontSize: 18,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         Text(
                           'STAGE3',
                           style: GoogleFonts.mochiyPopOne(
@@ -1551,46 +1990,111 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                             ),
                           ),
                         ),
-                        const SizedBox(height: 20),
-                        ElevatedButton.icon(
-                          onPressed: () => _showHowToPlayDialog(context),
-                          icon: const Icon(Icons.help_outline),
-                          label: Text(
-                            '遊び方',
-                            style: GoogleFonts.mochiyPopOne(
-                              fontSize: 18,
-                              color: Colors.white,
+                        // フリープレイモードの表示
+                        if (widget.gameService.isFreePlay)
+                          Container(
+                            margin: const EdgeInsets.only(top: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withOpacity(0.8),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              'フリープレイモード',
+                              style: GoogleFonts.mochiyPopOne(
+                                fontSize: 14,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blueAccent,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                            elevation: 6,
-                          ),
+                        const SizedBox(height: 20),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: () => _showHowToPlayDialog(context),
+                              icon: const Icon(Icons.help_outline),
+                              label: Text(
+                                '遊び方',
+                                style: GoogleFonts.mochiyPopOne(
+                                  fontSize: 18,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blueAccent,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                                elevation: 6,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            ElevatedButton.icon(
+                              onPressed: _resetBackground,
+                              icon: const Icon(Icons.landscape),
+                              label: Text(
+                                '背景変更',
+                                style: GoogleFonts.mochiyPopOne(
+                                  fontSize: 18,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.teal,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                                elevation: 6,
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 20),
-                        ElevatedButton(
-                          onPressed: _toggleDebugMode,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isDebugMode ? Colors.red : Colors.grey[700],
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 30,
-                              vertical: 15,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            ElevatedButton(
+                              onPressed: _toggleDebugMode,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _isDebugMode ? Colors.red : Colors.grey[700],
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 30,
+                                  vertical: 15,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                              ),
+                              child: Text(
+                                _isDebugMode ? 'デバッグモード終了' : 'デバッグモード開始',
+                                style: GoogleFonts.mochiyPopOne(
+                                  fontSize: 18,
+                                  color: Colors.white,
+                                ),
+                              ),
                             ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
+                            const SizedBox(width: 16),
+                            ElevatedButton.icon(
+                              onPressed: !widget.gameService.isFreePlay ? _toggleFreePlayMode : null,
+                              icon: const Icon(Icons.videogame_asset),
+                              label: Text(
+                                'フリープレイモード',
+                                style: GoogleFonts.mochiyPopOne(
+                                  fontSize: 18,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: widget.gameService.isFreePlay ? Colors.grey : Colors.orange,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                elevation: 6,
+                              ),
                             ),
-                          ),
-                          child: Text(
-                            _isDebugMode ? 'デバッグモード終了' : 'デバッグモード開始',
-                            style: GoogleFonts.mochiyPopOne(
-                              fontSize: 18,
-                              color: Colors.white,
-                            ),
-                          ),
+                          ],
                         ),
                       ],
                     ),
@@ -2308,6 +2812,66 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       }
     } else {
       print('SE停止: オーディオプレーヤーが未初期化');
+    }
+  }
+
+  // ランダムな背景タイプを選択するメソッド
+  void _selectRandomBackground() {
+    final random = math.Random();
+    final backgroundTypes = BackgroundType.values;
+    _currentBackgroundType = backgroundTypes[random.nextInt(backgroundTypes.length)];
+    
+    print('選択された背景タイプ: $_currentBackgroundType');
+  }
+
+  // 外部からも背景をリセットできるようにする
+  void _resetBackground() {
+    // 前の背景タイプを保存
+    final oldBackgroundType = _currentBackgroundType;
+    
+    // 新しい背景タイプを選択（現在と異なるものを選ぶ）
+    BackgroundType newType;
+    final random = math.Random();
+    final backgroundTypes = BackgroundType.values;
+    
+    do {
+      newType = backgroundTypes[random.nextInt(backgroundTypes.length)];
+    } while (newType == oldBackgroundType && backgroundTypes.length > 1);
+    
+    _currentBackgroundType = newType;
+    
+    // 視覚的なフィードバック
+    if (mounted) {
+      // フェードアウト・イン効果を使用した状態更新
+      setState(() {
+        // 状態を更新して再描画
+      });
+      
+      print('背景タイプを変更: $oldBackgroundType → $_currentBackgroundType');
+    }
+  }
+  
+  // フリープレイモードの切り替え
+  void _toggleFreePlayMode() {
+    if (!widget.gameService.isFreePlay) {
+      widget.gameService.setFreePlayMode();
+      if (mounted) {
+        setState(() {
+          // UI更新
+        });
+      }
+      
+      // フリープレイモード有効時のメッセージ
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'フリープレイモードを有効にしました。LINE連携なしでプレイできます。',
+            style: GoogleFonts.mochiyPopOne(),
+          ),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
   }
 }
