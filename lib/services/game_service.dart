@@ -104,9 +104,14 @@ class GameService {
       }
       
       final String status = data['status'] as String;
-      final bool isActive = status == "active";
-      final userId = data['userId'] as String?;
+      final bool stage3Completed = data['stage3Completed'] == true;
+      final userId = data['lineUserId'] as String?;
       
+      if (stage3Completed) {
+        _errorMessage = 'このゲームは既にクリア済みです';
+        return false;
+      }
+
       // STAGE2をクリア済みかチェック (status = 2)
       if (status != "stage2") {
         _errorMessage = status == "stage1"
@@ -149,7 +154,7 @@ class GameService {
           .collection('gameIds')
           .doc(_gameId)
           .update({
-            'status': 3,
+            'status': "stage3",
             'stage3Score': score,
             'updatedAt': FieldValue.serverTimestamp()
           });
