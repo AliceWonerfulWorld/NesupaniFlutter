@@ -161,13 +161,10 @@ class GameService {
       
       // 2. LINEボットに通知
       final response = await http.post(
-        Uri.parse(_lineWebhookEndpoint),
+        Uri.parse('https://asia-northeast1-nesugoshipanic.cloudfunctions.net/app/api/stage3-completed'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
-          'type': 'game_clear',
           'gameId': _gameId,
-          'lineId': _lineUserId,
-          'stage': 'STAGE3',
           'score': score
         }),
       );
