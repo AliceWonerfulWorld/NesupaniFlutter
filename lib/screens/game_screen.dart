@@ -14,6 +14,8 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   // アニメーションコントローラー
   late AnimationController _animationController;
   late Animation<double> _animation;
+  // 目をつぶっているかどうかを示す変数を追加
+  bool _isEyesClosed = false;
 
   @override
   void initState() {
@@ -86,30 +88,31 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
           ),
 
           // 電車の進行状況ゲージ
-          Positioned(
-            top: 50,
-            left: 20,
-            right: 20,
-            child: Container(
-              height: 20,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                color: Colors.grey[300],
-              ),
-              child: FractionallySizedBox(
-                alignment: Alignment.centerLeft,
-                widthFactor: _progress,
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    gradient: LinearGradient(
-                      colors: [Colors.blue, Colors.lightBlue],
+          if (!_isEyesClosed) // 目をつぶっている間は隠す
+            Positioned(
+              top: 50,
+              left: 20,
+              right: 20,
+              child: Container(
+                height: 20,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  color: Colors.grey[300],
+                ),
+                child: FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: _progress,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      gradient: LinearGradient(
+                        colors: [Colors.blue, Colors.lightBlue],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
 
           // ゲームオーバー表示
           if (_isGameOver)
@@ -186,5 +189,12 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
         ],
       ),
     );
+  }
+
+  // 目をつぶっている状態を更新するメソッドを追加
+  void updateEyeState(bool isClosed) {
+    setState(() {
+      _isEyesClosed = isClosed;
+    });
   }
 } 
