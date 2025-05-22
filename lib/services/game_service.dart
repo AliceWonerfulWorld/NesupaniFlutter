@@ -103,14 +103,17 @@ class GameService {
         return false;
       }
       
-      final status = data['status'] as int?;
+      final String status = data['status'] as String;
+      final bool isActive = status == "active";
       final userId = data['userId'] as String?;
       
       // STAGE2をクリア済みかチェック (status = 2)
-      if (status != 2) {
-        _errorMessage = status == 0 
+      if (status != "stage2") {
+        _errorMessage = status == "stage1"
             ? 'STAGE1から順にプレイしてください' 
-            : (status == 1 ? 'STAGE2をクリアしてください' : 'このゲームは既にクリア済みです');
+            : (status == "active" 
+            ? 'STAGE2をクリアしてください' 
+            : 'このゲームは既にクリア済みです');
         return false;
       }
       
