@@ -77,7 +77,7 @@ flutter:
     - assets/sounds/train_sound.mp3
     - assets/sounds/game_over.mp3
     - assets/sounds/game_clear.mp3
-
+    - assets/sounds/snore.mp3
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 

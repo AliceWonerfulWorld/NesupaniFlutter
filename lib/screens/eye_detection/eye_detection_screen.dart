@@ -678,6 +678,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   static const double CONSECUTIVE_BONUS_MULTIPLIER = 0.5; // 連続ボーナス係数
   static const int EYES_CLOSED_SCORE_INTERVAL = 200; // 目を閉じている間のスコア加算間隔（ミリ秒）- 短くして反応を早く
   static const int EYES_CLOSED_SCORE_INCREMENT = 1; // 目を閉じている間の加算量
+  int _eyesClosedDuration = 0; // 目を閉じている累積時間（ミリ秒）
   
   final List<String> _stations = [
     '基山駅',
@@ -718,6 +719,10 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   // ゲームオーバー・クリアSE用 AudioPlayer
   AudioPlayer? _gameOverSoundPlayer;
   AudioPlayer? _gameClearSoundPlayer;
+
+  // いびきSE用 AudioPlayer
+  AudioPlayer? _snorePlayer;
+  bool _isSnorePlaying = false;
 
   // 画面サイズに基づいて小さい画面かどうかを判定
   bool get isSmallScreen => MediaQuery.of(context).size.width < 600;
@@ -1161,6 +1166,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
           _isEyesOpen = leftEyeOpen || rightEyeOpen;
           _debugFace = face;
         });
+        updateEyeState(!leftEyeOpen && !rightEyeOpen);
         print('processImage: _isGameStarted=$_isGameStarted, _isDebugMode=$_isDebugMode, left: $leftEyeOpen, right: $rightEyeOpen');
 
         if (_isGameStarted && _wasEyesOpen && leftEyeClosed && rightEyeClosed) {
@@ -1347,10 +1353,29 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
           return;
         }
         if (!_isEyesOpen) {
+          _eyesClosedDuration += EYES_CLOSED_SCORE_INTERVAL;
+          int bonus = 0;
+          if (_eyesClosedDuration >= 3000) {
+            bonus = 5; // 3秒以上連続で閉じていたら5点ボーナス
+          } else if (_eyesClosedDuration >= 1500) {
+            bonus = 2; // 1.5秒以上なら2点ボーナス
+          }
           if (mounted) {
             setState(() {
-              _score += EYES_CLOSED_SCORE_INCREMENT;
+              _score += EYES_CLOSED_SCORE_INCREMENT + bonus;
             });
+          }
+          // いびきSE再生
+          if (!_isSnorePlaying && _snorePlayer != null) {
+            _snorePlayer?.play();
+            _isSnorePlaying = true;
+          }
+        } else {
+          _eyesClosedDuration = 0;
+          // いびきSE停止
+          if (_isSnorePlaying && _snorePlayer != null) {
+            _snorePlayer?.stop();
+            _isSnorePlaying = false;
           }
         }
       }
@@ -1837,6 +1862,12 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     _gameOverSoundPlayer = null;
     _gameClearSoundPlayer?.dispose();
     _gameClearSoundPlayer = null;
+    // いびきSEの解放
+    if (_isSnorePlaying) {
+      _snorePlayer?.stop();
+    }
+    _snorePlayer?.dispose();
+    _snorePlayer = null;
     
     print('dispose: リソース解放完了');
     super.dispose();
@@ -2281,6 +2312,13 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                           ),
                         ),
                       ),
+                      // 目が閉じている時の暗いオーバーレイ
+                      if (!_isEyesOpen)
+                        Positioned.fill(
+                          child: Container(
+                            color: Color.fromRGBO(0, 0, 0, 0.9),
+                          ),
+                        ),
                       // 駅名表示とスコア表示（上部中央に縦並びカード風）
                       Positioned(
                         top: isSmallScreen ? 16 : 24,
@@ -2443,6 +2481,13 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                           ),
                         ),
                       ),
+                      // 目を閉じている時の暗いオーバーレイ（Stackの一番上に移動）
+                      if (!_isEyesOpen)
+                        Positioned.fill(
+                          child: Container(
+                            color: Color.fromRGBO(0, 0, 0, 1.0),
+                          ),
+                        ),
                     ],
                   );
                 },
@@ -2605,6 +2650,7 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
             setState(() {
               // 目の状態更新
               _isEyesOpen = newEyesOpenState;
+              updateEyeState(!newEyesOpenState);
               
               // 目を閉じた場合は駅通過フラグを立てる
               if (!newEyesOpenState) {
@@ -2751,6 +2797,11 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
     _gameClearSoundPlayer = AudioPlayer();
     await _gameClearSoundPlayer?.setAsset('assets/sounds/game_clear.mp3');
     // ループ再生はしないので LoopMode.off (デフォルト)
+
+    // いびきSEの初期化
+    _snorePlayer = AudioPlayer();
+    await _snorePlayer?.setAsset('assets/sounds/snore.mp3');
+    await _snorePlayer?.setLoopMode(LoopMode.all);
   }
 
   Future<void> _playTrainSound() async {
@@ -2888,5 +2939,11 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
         ),
       ),
     );
+  }
+
+  void updateEyeState(bool isClosed) {
+    setState(() {
+      _isEyesOpen = !isClosed;
+    });
   }
 }

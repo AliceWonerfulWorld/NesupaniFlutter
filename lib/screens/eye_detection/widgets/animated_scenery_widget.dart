@@ -45,11 +45,6 @@ class AnimatedSceneryWidget extends StatelessWidget {
           // 雲
           _buildCloud(top: 20, left: 40 + (offset * 120) % 200),
           _buildCloud(top: 50, left: 180 + (offset * 100) % 200),
-          // 目が閉じている時の暗いオーバーレイ
-          if (!isEyesOpen)
-            Container(
-              color: Colors.black.withOpacity(0.7),
-            ),
         ],
       ),
     );
