@@ -166,12 +166,12 @@ class GameService {
       // 2. LINEボットに通知
       print('LINEボットへの通知を開始: gameId=$_gameId, score=$score');
       final response = await http.post(
-        Uri.parse('https://asia-northeast1-nesugoshipanic.cloudfunctions.net/app/api/stage3-completed'),
+        Uri.parse('https://asia-northeast1-nesugoshipanic.cloudfunctions.net/app/api/line-notify'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
-          'gameId': _gameId,
+          'userId': _lineUserId, // サーバー側のuserIdに合わせる
           'score': score,
-          'lineUserId': _lineUserId  // LINEユーザーIDも送信
+          'isGameOver': false // クリア時はfalse
         }),
       );
       
