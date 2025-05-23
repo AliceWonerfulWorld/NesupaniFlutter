@@ -1466,14 +1466,35 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       if (!widget.gameService.isFreePlay) {
         // ゲームクリア情報をFirestoreに保存し、LINEボットに通知
         try {
+          print('ゲームクリア処理開始: スコア $_score');
           final success = await widget.gameService.completeGame(_score);
           if (success) {
             print('ゲームクリア情報をLINEボットに送信しました: スコア $_score');
           } else {
             print('ゲームクリア情報の送信に失敗しました: ${widget.gameService.errorMessage}');
+            // エラーメッセージをユーザーに表示
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('LINE通知に失敗しました: ${widget.gameService.errorMessage}'),
+                  backgroundColor: Colors.red,
+                  duration: const Duration(seconds: 5),
+                ),
+              );
+            }
           }
-        } catch (e) {
+        } catch (e, stackTrace) {
           print('ゲームクリア情報送信エラー: $e');
+          print('スタックトレース: $stackTrace');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('予期せぬエラーが発生しました: $e'),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 5),
+              ),
+            );
+          }
         }
       } else {
         print('フリープレイモードのためLINE連携処理をスキップしました');
