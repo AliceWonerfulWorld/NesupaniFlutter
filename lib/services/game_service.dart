@@ -158,6 +158,7 @@ class GameService {
           .update({
             'status': "stage3",
             'stage3Score': score,
+            'stage3Completed': true,  // 明示的にクリアフラグを設定
             'updatedAt': FieldValue.serverTimestamp()
           });
       print('Firestoreの更新が完了しました');
@@ -169,7 +170,8 @@ class GameService {
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'gameId': _gameId,
-          'score': score
+          'score': score,
+          'lineUserId': _lineUserId  // LINEユーザーIDも送信
         }),
       );
       
