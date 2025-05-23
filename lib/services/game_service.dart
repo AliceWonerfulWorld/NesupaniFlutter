@@ -143,12 +143,14 @@ class GameService {
     
     if (!_isAuthenticated || _gameId == null || _lineUserId == null) {
       _errorMessage = '認証されていないため結果を送信できません';
+      print('認証エラー: isAuthenticated=$_isAuthenticated, gameId=$_gameId, lineUserId=$_lineUserId');
       return false;
     }
     
     _isLoading = true;
     
     try {
+      print('Firestoreの更新を開始: gameId=$_gameId, score=$score');
       // 1. Firestoreのstatusを更新 (2→3)
       await FirebaseFirestore.instance
           .collection('gameIds')
@@ -158,8 +160,10 @@ class GameService {
             'stage3Score': score,
             'updatedAt': FieldValue.serverTimestamp()
           });
+      print('Firestoreの更新が完了しました');
       
       // 2. LINEボットに通知
+      print('LINEボットへの通知を開始: gameId=$_gameId, score=$score');
       final response = await http.post(
         Uri.parse('https://asia-northeast1-nesugoshipanic.cloudfunctions.net/app/api/stage3-completed'),
         headers: {'Content-Type': 'application/json'},
@@ -169,9 +173,11 @@ class GameService {
         }),
       );
       
+      print('LINEボットからの応答: statusCode=${response.statusCode}, body=${response.body}');
+      
       if (response.statusCode != 200) {
         print('LINE通知エラー: ${response.body}');
-        _errorMessage = 'LINEボットへの通知に失敗しました';
+        _errorMessage = 'LINEボットへの通知に失敗しました (ステータスコード: ${response.statusCode})';
         _isLoading = false;
         return false;
       }
@@ -179,9 +185,10 @@ class GameService {
       print('ゲームクリア情報をLINEボットに送信しました');
       _isLoading = false;
       return true;
-    } catch (e) {
+    } catch (e, stackTrace) {
       _errorMessage = 'ゲームクリア処理エラー: $e';
-      print(_errorMessage);
+      print('エラー詳細: $e');
+      print('スタックトレース: $stackTrace');
       _isLoading = false;
       return false;
     }
