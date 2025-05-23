@@ -1,3 +1,11 @@
+const express = require('express');
+const cors = require('cors');
+const app = express();
+
+// CORSを有効化
+app.use(cors());
+app.use(express.json());
+
 // LINE Botの設定
 const lineConfig = {
     channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
