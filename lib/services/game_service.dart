@@ -46,12 +46,50 @@ class GameService {
       print('GameID: $_gameId を取得しました');
       
       // Firestoreでゲーム状態を確認
-      final isValid = await _verifyGameStatus();
+      final docSnapshot = await FirebaseFirestore.instance
+          .collection('gameIds')
+          .doc(_gameId)
+          .get();
       
-      _isAuthenticated = isValid;
+      if (!docSnapshot.exists) {
+        _errorMessage = '無効なゲームIDです';
+        _isLoading = false;
+        return false;
+      }
+      
+      final data = docSnapshot.data();
+      if (data == null) {
+        _errorMessage = 'ゲームデータが見つかりません';
+        _isLoading = false;
+        return false;
+      }
+      
+      final bool stage3Completed = data['stage3Completed'] == true;
+      if (stage3Completed) {
+        setFreePlayMode();
+        _isLoading = false;
+        return true;
+      }
+      
+      // STAGE2をクリア済みかチェック (status = 2)
+      final String status = data['status'] as String;
+      if (status != "stage2") {
+        _errorMessage = status == "stage1"
+            ? 'STAGE1から順にプレイしてください' 
+            : (status == "active" 
+            ? 'STAGE2をクリアしてください' 
+            : 'このゲームは既にクリア済みです');
+        _isLoading = false;
+        return false;
+      }
+      
+      // LINEユーザーIDを保存
+      _lineUserId = data['lineUserId'] as String?;
+      
+      _isAuthenticated = true;
       _isLoading = false;
       
-      return isValid;
+      return true;
     } catch (e) {
       _errorMessage = '初期化エラー: $e';
       _isLoading = false;
