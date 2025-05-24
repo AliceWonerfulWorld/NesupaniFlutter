@@ -1609,8 +1609,8 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                   onPressed: () {
                     // LINEに戻るボタン
                     Navigator.of(context).pop();
-                    // LINEアプリを起動
-                    _openUrl('https://line.me/R/');
+                    // LINE公式アカウントのトーク画面を開く
+                    _openUrl('https://line.me/R/ti/p/@910frzll');
                   },
                   icon: const Icon(Icons.chat),
                   label: Text('LINEに戻る', style: GoogleFonts.mochiyPopOne()),
