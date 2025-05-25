@@ -234,6 +234,40 @@ class GameService {
     }
   }
 
+  /// ニックネームを保存する
+  Future<bool> saveNickname(String nickname) async {
+    if (_isFreePlay) {
+      print('フリープレイモード: ニックネーム保存をスキップ');
+      return true;
+    }
+
+    if (!_isAuthenticated || _gameId == null) {
+      _errorMessage = '認証されていないためニックネームを保存できません';
+      return false;
+    }
+
+    _isLoading = true;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('gameIds')
+          .doc(_gameId)
+          .update({
+            'nickname': nickname,
+            'updatedAt': FieldValue.serverTimestamp()
+          });
+      
+      print('ニックネームを保存しました: $nickname');
+      _isLoading = false;
+      return true;
+    } catch (e) {
+      _errorMessage = 'ニックネーム保存エラー: $e';
+      print('エラー詳細: $e');
+      _isLoading = false;
+      return false;
+    }
+  }
+
   /// エラーメッセージをクリア
   void clearError() {
     _errorMessage = '';
