@@ -1464,38 +1464,8 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
       
       // フリープレイモードではLINE連携処理をスキップ
       if (!widget.gameService.isFreePlay) {
-        // ゲームクリア情報をFirestoreに保存し、LINEボットに通知
-        try {
-          print('ゲームクリア処理開始: スコア $_score');
-          final success = await widget.gameService.completeGame(_score);
-          if (success) {
-            print('ゲームクリア情報をLINEボットに送信しました: スコア $_score');
-          } else {
-            print('ゲームクリア情報の送信に失敗しました: ${widget.gameService.errorMessage}');
-            // エラーメッセージをユーザーに表示
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('LINE通知に失敗しました: ${widget.gameService.errorMessage}'),
-                  backgroundColor: Colors.red,
-                  duration: const Duration(seconds: 5),
-                ),
-              );
-            }
-          }
-        } catch (e, stackTrace) {
-          print('ゲームクリア情報送信エラー: $e');
-          print('スタックトレース: $stackTrace');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('予期せぬエラーが発生しました: $e'),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 5),
-              ),
-            );
-          }
-        }
+        // ニックネーム入力ダイアログを表示
+        await _showNicknameInputDialog();
       } else {
         print('フリープレイモードのためLINE連携処理をスキップしました');
       }
@@ -1642,6 +1612,149 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ニックネーム入力ダイアログを表示するメソッド
+  Future<void> _showNicknameInputDialog() async {
+    final TextEditingController nicknameController = TextEditingController();
+    bool isSubmitting = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          child: Container(
+            padding: const EdgeInsets.all(28),
+            constraints: const BoxConstraints(maxWidth: 400),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFFFFF8E1), Color(0xFFFFECB3)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 16,
+                  offset: Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.emoji_events,
+                  color: Colors.amber[800],
+                  size: 60,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'ゲームクリア！',
+                  style: GoogleFonts.mochiyPopOne(
+                    fontSize: 28,
+                    color: Colors.amber[900],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'ニックネームを入力してください',
+                  style: GoogleFonts.mochiyPopOne(
+                    fontSize: 18,
+                    color: Colors.amber[900],
+                  ),
+                ),
+                const SizedBox(height: 24),
+                TextField(
+                  controller: nicknameController,
+                  decoration: InputDecoration(
+                    hintText: 'ニックネーム',
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 16,
+                    ),
+                  ),
+                  style: GoogleFonts.mochiyPopOne(
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (isSubmitting)
+                      const CircularProgressIndicator()
+                    else
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          final nickname = nicknameController.text.trim();
+                          if (nickname.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('ニックネームを入力してください'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+
+                          setState(() => isSubmitting = true);
+
+                          try {
+                            final success = await widget.gameService.saveNickname(nickname);
+                            if (success) {
+                              Navigator.of(context).pop();
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(widget.gameService.errorMessage),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('エラーが発生しました: $e'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          } finally {
+                            setState(() => isSubmitting = false);
+                          }
+                        },
+                        icon: const Icon(Icons.save),
+                        label: Text('保存', style: GoogleFonts.mochiyPopOne()),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.amber,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 14,
+                          ),
+                          elevation: 8,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
