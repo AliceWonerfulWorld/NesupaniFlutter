@@ -189,6 +189,19 @@ class GameService {
     
     try {
       print('Firestoreの更新を開始: gameId=$_gameId, score=$score');
+      // 既存のstage1Score, stage2Scoreを取得
+      final docSnapshot = await FirebaseFirestore.instance
+          .collection('gameIds')
+          .doc(_gameId)
+          .get();
+      final data = docSnapshot.data();
+      int stage1Score = 0;
+      int stage2Score = 0;
+      if (data != null) {
+        stage1Score = (data['stage1Score'] ?? 0) is int ? data['stage1Score'] : int.tryParse(data['stage1Score']?.toString() ?? '0') ?? 0;
+        stage2Score = (data['stage2Score'] ?? 0) is int ? data['stage2Score'] : int.tryParse(data['stage2Score']?.toString() ?? '0') ?? 0;
+      }
+      final totalScore = stage1Score + stage2Score + score;
       // 1. Firestoreのstatusを更新 (2→3)
       await FirebaseFirestore.instance
           .collection('gameIds')
@@ -197,6 +210,7 @@ class GameService {
             'status': "stage3",
             'stage3Score': score,
             'stage3Completed': true,  // 明示的にクリアフラグを設定
+            'totalScore': totalScore,
             'updatedAt': FieldValue.serverTimestamp()
           });
       print('Firestoreの更新が完了しました');
