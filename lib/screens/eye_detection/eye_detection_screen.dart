@@ -1716,6 +1716,8 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
                           try {
                             final success = await widget.gameService.saveNickname(nickname);
                             if (success) {
+                              // ここでスコアとクリア判定をFirestoreに保存
+                              await widget.gameService.completeGame(_score);
                               Navigator.of(context).pop();
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
