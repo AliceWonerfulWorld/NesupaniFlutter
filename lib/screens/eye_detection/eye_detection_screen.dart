@@ -2923,20 +2923,24 @@ class _EyeDetectionScreenState extends State<EyeDetectionScreen> with WidgetsBin
   Future<void> _initializeAudio() async {
     _audioPlayer = AudioPlayer();
     await _audioPlayer?.setAsset('assets/sounds/train_sound.mp3');
+    await _audioPlayer?.setVolume(0.6); // 電車音も少し小さく
     await _audioPlayer?.setLoopMode(LoopMode.all);
 
     // ゲームオーバー・クリアSEの初期化
     _gameOverSoundPlayer = AudioPlayer();
     await _gameOverSoundPlayer?.setAsset('assets/sounds/game_over.mp3'); 
+    await _gameOverSoundPlayer?.setVolume(0.5); // 音量を50%に設定
     // ループ再生はしないので LoopMode.off (デフォルト)
 
     _gameClearSoundPlayer = AudioPlayer();
     await _gameClearSoundPlayer?.setAsset('assets/sounds/game_clear.mp3');
+    await _gameClearSoundPlayer?.setVolume(0.3); // 音量を30%に設定（クリア音を小さく）
     // ループ再生はしないので LoopMode.off (デフォルト)
 
     // いびきSEの初期化
     _snorePlayer = AudioPlayer();
     await _snorePlayer?.setAsset('assets/sounds/snore.mp3');
+    await _snorePlayer?.setVolume(0.4); // いびき音も少し小さく
     await _snorePlayer?.setLoopMode(LoopMode.all);
   }
 
